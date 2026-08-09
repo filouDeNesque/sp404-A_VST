@@ -284,4 +284,36 @@ docs/     spécification du format de carte SD SP-404SX et ses sources.
 - Persistance d'état (banque active, mode offline/live) dans la session DAW
   (`getStateInformation` est actuellement un no-op — le mode offline/live et le miroir
   survivent sur disque, mais pas la sélection "on était en offline" au rechargement du plugin).
+- Gestion des patterns (`ROLAND/SP-404SX/PTN/PTNxxxxx.BIN`, `STPINFO.BIN`) — aucun code dans ce
+  projet aujourd'hui, mais le format `PTN` est en fait partiellement documenté par la
+  communauté (contrairement à ce que laissait entendre l'ancienne version de
+  `docs/sp404sx-format.md`) : voir la classe `AudioPattern` d'
+  [uttori-audio-padinfo](https://github.com/uttori/uttori-audio-padinfo) (déjà cité plus haut
+  comme source `PAD_INFO.BIN`, convertit aussi `PTNxxxxx.BIN` ↔ MIDI),
+  [spEdit404](https://github.com/bobgonzalez/spEdit404) et [la doc de
+  byteflip.club](http://byteflip.club/sp-edit/roland-sp404sx-ptn-format). Numérotation déduite
+  de ces sources : séquentielle sur toutes les banques, 12 patterns/banque comme les pads
+  (`offset = banque × 12 + index`). `STPINFO.BIN` reste sans documentation trouvée. **Préalable
+  obligatoire avant tout le reste de cette liste** : vérifier le format contre une vraie carte
+  SD (même méthodologie que `PAD_INFO.BIN`), et surtout déterminer si un événement de pattern
+  référence un pad de sa propre banque ou n'importe lequel — ça conditionne toute la gestion
+  des samples liés ci-dessous.
+  - Lecture seule (`core/`) : parser un pattern en liste d'événements (tick, pad référencé,
+    vélocité) + longueur en bars, testé sur des fixtures dumpées d'une vraie carte.
+  - Visualisation dans le plugin : lister les patterns d'une banque, afficher leur longueur et
+    les pads qu'ils référencent ; détecter et signaler en continu (pas seulement à l'import) un
+    pad référencé sans sample, ou dont le sample a changé depuis.
+  - Sauvegarder/charger un pattern : ne jamais exporter le `PTNxxxxx.BIN` seul — le bundler avec
+    les samples des pads référencés et leur tranche `PAD_INFO.BIN`, même logique que
+    `BankArchive::saveBankToZip`, sinon restaurer ailleurs (autre banque, autre carte) rejoue
+    n'importe quoi.
+  - Renommer/dupliquer/réorganiser un pattern entre slots, et suppression — symétrique de ce qui
+    existe déjà pour les banks (menu de gestion des banks).
+  - Aperçu en lecture seule d'un pattern dans l'UI (mini-timeline) avant chargement.
+  - Export pattern → fichier MIDI standard (conversion déjà implémentée côté `AudioPattern`,
+    réutilisable comme référence) et import MIDI → pattern SP-404 en sens inverse (quantisé sur
+    la grille de 384 ticks/bar, résolution note MIDI → pad à définir).
+  - Triggering d'un pattern entier depuis le DAW, synchronisé tempo/transport hôte (au-delà du
+    triggering pad-par-pad actuel) — nécessite un scheduler interne aligné sur
+    `juce::AudioPlayHead`, le plus gros morceau de cette liste.
 

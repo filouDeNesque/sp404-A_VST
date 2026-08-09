@@ -108,4 +108,11 @@ la carte, plutôt que d'être copié tel quel à un taux potentiellement différ
    octets "unknown" restent des placeholders). À faire : lire le code source complet de
    `uttori-audio-wave` et/ou dumper les premiers octets d'un `.WAV` réel de `SMPL/`.
 2. Le fichier `PTN/` (patterns) et `STPINFO.BIN` observés sur la vraie carte ne sont pas encore
-   documentés ici — hors scope tant que le triggering de patterns n'est pas implémenté.
+   documentés ici — hors scope tant que le triggering de patterns n'est pas implémenté (voir
+   Roadmap dans le README). Correction : `PTN/PTNxxxxx.BIN` n'est en fait pas totalement
+   undocumented — voir la classe `AudioPattern` d'
+   [uttori-audio-padinfo](https://github.com/uttori/uttori-audio-padinfo),
+   [spEdit404](https://github.com/bobgonzalez/spEdit404) et [la doc de
+   byteflip.club](http://byteflip.club/sp-edit/roland-sp404sx-ptn-format) — reste à vérifier
+   contre une vraie carte, comme pour `PAD_INFO.BIN` ci-dessus. `STPINFO.BIN` reste sans
+   documentation trouvée.
