@@ -228,7 +228,7 @@ d'écran personnel.
 ## Architecture
 
 ```
-core/     bibliothèque C++ pure (PadInfo, Bank/Pad, SdCard, WavInfo, RlndChunk) — zéro
+core/     bibliothèque C++ pure (PadInfo, Bank/Pad, SdCard, WavInfo, RlndChunk, Pattern) — zéro
           dépendance audio/GUI JUCE, testée indépendamment.
 plugin/   cible JUCE (VST3 + AU, synthé), éditeur hébergeant une WebView (JUCE 8
           WebBrowserComponent) qui appelle du code natif via des NativeFunction ;
@@ -284,22 +284,24 @@ docs/     spécification du format de carte SD SP-404SX et ses sources.
 - Persistance d'état (banque active, mode offline/live) dans la session DAW
   (`getStateInformation` est actuellement un no-op — le mode offline/live et le miroir
   survivent sur disque, mais pas la sélection "on était en offline" au rechargement du plugin).
-- Gestion des patterns (`ROLAND/SP-404SX/PTN/PTNxxxxx.BIN`, `STPINFO.BIN`) — aucun code dans ce
-  projet aujourd'hui, mais le format `PTN` est en fait partiellement documenté par la
-  communauté (contrairement à ce que laissait entendre l'ancienne version de
-  `docs/sp404sx-format.md`) : voir la classe `AudioPattern` d'
-  [uttori-audio-padinfo](https://github.com/uttori/uttori-audio-padinfo) (déjà cité plus haut
-  comme source `PAD_INFO.BIN`, convertit aussi `PTNxxxxx.BIN` ↔ MIDI),
-  [spEdit404](https://github.com/bobgonzalez/spEdit404) et [la doc de
-  byteflip.club](http://byteflip.club/sp-edit/roland-sp404sx-ptn-format). Numérotation déduite
-  de ces sources : séquentielle sur toutes les banques, 12 patterns/banque comme les pads
-  (`offset = banque × 12 + index`). `STPINFO.BIN` reste sans documentation trouvée. **Préalable
-  obligatoire avant tout le reste de cette liste** : vérifier le format contre une vraie carte
-  SD (même méthodologie que `PAD_INFO.BIN`), et surtout déterminer si un événement de pattern
-  référence un pad de sa propre banque ou n'importe lequel — ça conditionne toute la gestion
-  des samples liés ci-dessous.
-  - Lecture seule (`core/`) : parser un pattern en liste d'événements (tick, pad référencé,
-    vélocité) + longueur en bars, testé sur des fixtures dumpées d'une vraie carte.
+- Gestion des patterns (`ROLAND/SP-404SX/PTN/PTNxxxxx.BIN`, `STPINFO.BIN`).
+  - ✅ **Préalable obligatoire vérifié (2026-08-09)** : format `PTN` vérifié contre 3 vrais
+    fichiers d'une carte SD SP-404SX réelle (croisé avec la classe `AudioPattern` d'
+    [uttori-audio-padinfo](https://github.com/uttori/uttori-audio-padinfo),
+    [spEdit404](https://github.com/bobgonzalez/spEdit404) et [la doc de
+    byteflip.club](http://byteflip.club/sp-edit/roland-sp404sx-ptn-format)) — voir la section
+    "`PTN/PTNxxxxx.BIN`" de `docs/sp404sx-format.md` pour la structure complète (8 octets/
+    événement, footer 16 octets, adressage pad, et l'octet du nombre de mesures propre au
+    SP-404SX qu'aucune des sources communautaires ne documentait). Sur les 3 patterns réels,
+    chaque pattern ne référence que les pads d'**une seule banque** — donc, en pratique, la
+    gestion des samples liés ci-dessous peut raisonnablement supposer "un pattern = une banque",
+    tout en restant vigilant si un contre-exemple apparaît (voir "Ce qui reste ouvert" dans le
+    doc). `STPINFO.BIN` (124 octets sur la carte réelle) reste sans documentation trouvée.
+  - ✅ Lecture seule (`core/`) : `core/include/sp404/Pattern.h` / `core/src/Pattern.cpp`
+    parsent un pattern en liste d'événements (tick, pad référencé via `bank()`/
+    `padIndexInBank()`, vélocité, durée) + nombre de mesures, testé dans
+    `core/tests/PatternTests.cpp` contre les 3 mêmes fixtures réelles utilisées pour la
+    vérification du format ci-dessus.
   - Visualisation dans le plugin : lister les patterns d'une banque, afficher leur longueur et
     les pads qu'ils référencent ; détecter et signaler en continu (pas seulement à l'import) un
     pad référencé sans sample, ou dont le sample a changé depuis.

@@ -13,6 +13,7 @@ add_executable(sp404_core_tests
     WavRlndTests.cpp
     WavInfoTests.cpp
     SdCardTests.cpp
+    PatternTests.cpp
 )
 
 target_link_libraries(sp404_core_tests PRIVATE sp404_core Catch2::Catch2WithMain)

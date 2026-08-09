@@ -1,9 +1,10 @@
 # Format de la carte SD Roland SP-404SX
 
-Statut : **partiellement vérifié contre une vraie carte SD SP-404SX** (2026-08-08). L'emplacement
-du fichier d'index a été corrigé suite à cette vérification (voir plus bas) ; la table d'octets
-de `PAD_INFO.BIN` a été confirmée valeur par valeur sur un vrai enregistrement de pad. Le chunk
-WAV `RLND` reste non vérifié (voir "Points à vérifier").
+Statut : **partiellement vérifié contre une vraie carte SD SP-404SX** (2026-08-08, PTN ajouté
+2026-08-09). L'emplacement du fichier d'index a été corrigé suite à cette vérification (voir plus
+bas) ; la table d'octets de `PAD_INFO.BIN` a été confirmée valeur par valeur sur un vrai
+enregistrement de pad, et le format `PTN/PTNxxxxx.BIN` (patterns) a été vérifié contre 3 vrais
+fichiers de la carte. Le chunk WAV `RLND` reste non vérifié (voir "Points à vérifier").
 
 ## Sources
 
@@ -102,17 +103,87 @@ ré-échantillonnage lors de l'import d'un sample externe sur un pad (voir
 DAW, ou un mp3/flac/mp4 à un taux quelconque) est converti vers 44100 Hz avant d'être écrit sur
 la carte, plutôt que d'être copié tel quel à un taux potentiellement différent du matériel réel.
 
+## `PTN/PTNxxxxx.BIN` (patterns)
+
+**Vérifié contre 3 vrais fichiers `PTN` d'une carte SD SP-404SX réelle** (2026-08-09,
+`PTN00001.BIN`/`PTN00009.BIN`/`PTN00012.BIN`, montée en `/Volumes/SP-404SX`) en croisant leurs
+octets avec la classe `AudioPattern` d'
+[uttori-audio-padinfo](https://github.com/uttori/uttori-audio-padinfo/blob/master/src/audio-pattern.js)
+(elle-même partiellement basée sur [spEdit404](https://github.com/bobgonzalez/spEdit404) et [la
+doc de byteflip.club](http://byteflip.club/sp-edit/roland-sp404sx-ptn-format)). Implémenté dans
+`core/include/sp404/Pattern.h` / `core/src/Pattern.cpp`, testé contre ces 3 mêmes fichiers dans
+`core/tests/PatternTests.cpp` (octets bruts embarqués dans le test — ce ne sont que des
+événements numériques (tick/note/vélocité), pas de contenu audio).
+
+`AudioPattern` documente deux préréglages, "OG" (SP-404 original, 12 pads/banque) et "MKii" (16
+pads/banque) ; le SP-404SX n'est ni l'un ni l'autre exactement — 12 pads/banque comme l'OG, mais
+avec les octets de pied de fichier (footer) et la sémantique `bankSwitch` du MKii. Écart
+documenté ci-dessous.
+
+Structure : N enregistrements de 8 octets ("événements"), suivis d'un pied de fichier fixe de
+16 octets. `N = (taille du fichier / 8) - 2` (les 2 "slots" en moins correspondant exactement
+aux 16 octets du footer) — vérifié exact sur les 3 fichiers (232, 344 et 296 octets).
+
+### Événement (8 octets)
+
+| Offset | Champ | Type | Notes |
+|---|---|---|---|
+| 0 | `Ticks` | u8 | Délai depuis l'événement précédent, en ticks (96 PPQN → 384 ticks/mesure en 4/4) |
+| 1 | `MidiNote` | u8 | 47–106 pour un vrai événement ; **128 = placeholder/silence** (bourrage utilisé quand l'écart avec l'événement suivant dépasse 255 ticks, ou pour compléter jusqu'à la mesure) |
+| 2 | `BankSwitch` | u8 | `0` ou `64` = banques A–E ; `1` ou `65` = banques F–J (les deux orthographes vues sur de vrais patterns — voir plus bas) |
+| 3 | `PitchMode` | u8 | Mode Step Sequencer uniquement ; `0` sur tous les événements réels observés (aucun pattern en mode séquenceur vérifié) |
+| 4 | `Velocity` | u8 | 0–127 ; toujours `127` sur les événements réels observés |
+| 5 | `Unknown` | u8 | Toujours `64` (`0x40`) sur les événements réels observés, `0` sur les placeholders |
+| 6–7 | `LengthTicks` | u16 | Durée en ticks, **big-endian** (contrairement à ce que suggère `readUInt16(true)` dans `audio-pattern.js`, dont la signature exacte de `DataBuffer` n'a pas été vérifiée — l'interprétation big-endian est celle qui donne des valeurs cohérentes avec les écarts de `Ticks` observés) |
+
+Adressage pad depuis `MidiNote`/`BankSwitch` (12 pads/banque, comme l'OG) :
+`sampleNumber = MidiNote - 46` (1-based dans sa moitié), puis `+60` si `BankSwitch` indique la
+seconde moitié (F–J). `A1` = `MidiNote=47, BankSwitch=0` ; `J12` = `MidiNote=106,
+BankSwitch=65`. Vérifié : les 3 patterns réels retombent exactement sur les pads effectivement
+présents sur la carte (banques C, D et I respectivement, qui contiennent bien des samples).
+
+### Pied de fichier (16 octets)
+
+| Offset | Valeur observée | Notes |
+|---|---|---|
+| 0 | `0` | constant sur les 3 fichiers |
+| 1 | `140` (`0x8C`) | constant sur les 3 fichiers |
+| 2–7 | `0` | constant sur les 3 fichiers |
+| 8 | `0` | **contrairement à `audio-pattern.js`** (qui attend le nombre de mesures ici pour un MKii) — toujours `0` sur le SP-404SX |
+| **9** | **nombre de mesures (entier)** | **découverte propre au SP-404SX**, absente de la doc `audio-pattern.js` : vérifié exact sur les 3 fichiers via `somme(Ticks de tous les événements, y compris placeholders) / 384 = footer[9]` (14, 4 et 14 respectivement — correspond exactement) |
+| 10–11 | `0` | constant sur les 3 fichiers |
+| 12 | signature rythmique | `0`=4/4, `1`=3/4, `2`=2/4, `3`=1/4, `4`=5/4, `5`=6/4, `7`=7/4 (valeur brute, `0` sur les 3 fichiers réels — non vérifié pour les autres valeurs) |
+| 13–15 | `0` | constant sur les 3 fichiers |
+
+### Ce qui reste ouvert
+
+- **Un pattern ne référence-t-il que sa propre banque ?** Sur les 3 patterns réels vérifiés,
+  chaque pattern référence des pads d'une seule et même banque (tous en C, tous en D, ou tous en
+  I) — y compris quand `BankSwitch` alterne entre `0` et `64` pour le *même* pad au sein d'un
+  même pattern (`PTN00001.BIN`, banque C, voit les deux). Ça suggère que `0`/`64` (ou `1`/`65`)
+  ne distinguent pas deux banques différentes mais deux variantes d'encodage de la même moitié
+  (peut-être liées à un second tap pour arrêter une note, comme le note `audio-pattern.js`).
+  Non vérifié en revanche : un pattern peut-il mélanger plusieurs banques *différentes* au sein
+  de la même moitié A–E (ou F–J) ? Aucun des 3 échantillons ne le fait, mais rien dans le format
+  ne l'interdit explicitement. À revérifier si un contre-exemple apparaît sur une vraie carte.
+- Signification exacte de `BankSwitch` en dehors des 4 valeurs vues (`0`, `1`, `64`, `65`) —
+  aucune autre valeur observée sur les 3 fichiers réels.
+- `PitchMode` en mode Step Sequencer (valeurs 129–152 documentées par `audio-pattern.js`) —
+  aucun pattern en mode séquenceur vérifié ici, ce parseur les transmet tels quels sans les
+  interpréter.
+- Numérotation des fichiers `PTNxxxxx.BIN` eux-mêmes (quel pad/bank physique déclenche quel
+  pattern) : toujours non vérifiée contre une vraie carte — voir Roadmap dans le README.
+  Observation en passant : dans nos 3 échantillons, le numéro du fichier (1, 9, 12) ne
+  correspond à *aucun* rapport évident avec la banque référencée par son contenu (C, D, I) —
+  cohérent avec l'hypothèse que le slot de stockage du pattern et les pads qu'il joue sont deux
+  espaces d'adressage indépendants.
+- `SMPL/STPINFO.BIN` (124 octets sur la carte réelle) reste sans documentation trouvée et n'a
+  pas été analysé.
+
 ## Points restant à vérifier
 
 1. Chunk WAV `RLND` : toujours non vérifié contre un vrai fichier `.WAV` de la carte (les
    octets "unknown" restent des placeholders). À faire : lire le code source complet de
    `uttori-audio-wave` et/ou dumper les premiers octets d'un `.WAV` réel de `SMPL/`.
-2. Le fichier `PTN/` (patterns) et `STPINFO.BIN` observés sur la vraie carte ne sont pas encore
-   documentés ici — hors scope tant que le triggering de patterns n'est pas implémenté (voir
-   Roadmap dans le README). Correction : `PTN/PTNxxxxx.BIN` n'est en fait pas totalement
-   undocumented — voir la classe `AudioPattern` d'
-   [uttori-audio-padinfo](https://github.com/uttori/uttori-audio-padinfo),
-   [spEdit404](https://github.com/bobgonzalez/spEdit404) et [la doc de
-   byteflip.club](http://byteflip.club/sp-edit/roland-sp404sx-ptn-format) — reste à vérifier
-   contre une vraie carte, comme pour `PAD_INFO.BIN` ci-dessus. `STPINFO.BIN` reste sans
-   documentation trouvée.
+2. Voir la section "Ce qui reste ouvert" ci-dessus pour les inconnues restantes sur le format
+   `PTN`.
