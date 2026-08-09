@@ -9,6 +9,7 @@
 
 #include "BankArchive.h"
 #include "BinaryData.h"
+#include "PatternArchive.h"
 #include "PluginProcessor.h"
 #include "SampleDsp.h"
 #include "SampleImport.h"
@@ -512,6 +513,57 @@ void handleLoadBank(PluginProcessor& processor, const juce::Array<juce::var>& ar
     respondOk(ok, completion);
 }
 
+// args: [bankChar, indexInBank, zipPath]
+void handleSavePattern(PluginProcessor& processor, const juce::Array<juce::var>& args,
+                        juce::WebBrowserComponent::NativeFunctionCompletion completion) {
+    bool ok = false;
+    if (const auto cardRoot = processor.resolveCardRoot(); cardRoot && args.size() > 2 && args[0].toString().length() == 1) {
+        ok = savePatternToZip(*cardRoot, static_cast<char>(args[0].toString()[0]), static_cast<int>(args[1]),
+                               juce::File(args[2].toString()));
+    }
+    respondOk(ok, completion);
+}
+
+// args: [zipPath] -- reads a pattern archive's manifest only, nothing is extracted. Used by the
+// UI to show the pattern's origin slot/length before the user confirms loading it somewhere.
+void handlePeekPatternZip(const juce::Array<juce::var>& args,
+                           juce::WebBrowserComponent::NativeFunctionCompletion completion) {
+    auto* response = new juce::DynamicObject();
+    PatternZipInfo info;
+    if (args.size() > 0)
+        info = peekPatternZip(juce::File(args[0].toString()));
+    response->setProperty("valid", info.valid);
+    if (info.valid) {
+        const char nameBuf[2]{info.savedFromBank, '\0'};
+        response->setProperty("savedFromBank", juce::String(nameBuf));
+        response->setProperty("savedFromIndexInBank", info.savedFromIndexInBank);
+        response->setProperty("bars", info.bars);
+    }
+    completion(juce::var(response));
+}
+
+// args: [zipPath, targetBankChar, targetIndexInBank] -- the target slot may differ from the slot
+// the archive was originally saved from (see sp404::loadPatternFromZip). Response adds
+// touchedBanks (every bank letter that may now have stale on-screen/BankLoader state) since a
+// pattern's dependency pads can live in a different bank than the slot it's loaded into.
+void handleLoadPattern(PluginProcessor& processor, const juce::Array<juce::var>& args,
+                        juce::WebBrowserComponent::NativeFunctionCompletion completion) {
+    LoadPatternResult result;
+    if (const auto cardRoot = processor.resolveCardRoot();
+        cardRoot && args.size() > 2 && args[1].toString().length() == 1) {
+        result = loadPatternFromZip(*cardRoot, juce::File(args[0].toString()), static_cast<char>(args[1].toString()[0]),
+                                     static_cast<int>(args[2]));
+    }
+
+    auto* response = new juce::DynamicObject();
+    response->setProperty("ok", result.ok);
+    juce::Array<juce::var> touchedBanksVar;
+    for (char bank : result.touchedBanks)
+        touchedBanksVar.add(juce::String::charToString(static_cast<juce::juce_wchar>(bank)));
+    response->setProperty("touchedBanks", touchedBanksVar);
+    completion(juce::var(response));
+}
+
 // args: [bankChar]
 void handleClearBank(PluginProcessor& processor, const juce::Array<juce::var>& args,
                       juce::WebBrowserComponent::NativeFunctionCompletion completion) {
@@ -972,6 +1024,17 @@ juce::WebBrowserComponent::Options makeWebViewOptions(PluginProcessor& processor
                              [&processor](const juce::Array<juce::var>& args,
                                           juce::WebBrowserComponent::NativeFunctionCompletion completion) {
                                  handleLoadBank(processor, args, completion);
+                             })
+        .withNativeFunction("savePatternToZip",
+                             [&processor](const juce::Array<juce::var>& args,
+                                          juce::WebBrowserComponent::NativeFunctionCompletion completion) {
+                                 handleSavePattern(processor, args, completion);
+                             })
+        .withNativeFunction("peekPatternZip", handlePeekPatternZip)
+        .withNativeFunction("loadPatternFromZip",
+                             [&processor](const juce::Array<juce::var>& args,
+                                          juce::WebBrowserComponent::NativeFunctionCompletion completion) {
+                                 handleLoadPattern(processor, args, completion);
                              })
         .withNativeFunction("clearBank",
                              [&processor](const juce::Array<juce::var>& args,

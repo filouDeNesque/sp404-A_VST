@@ -209,14 +209,19 @@ Les tests couvrent `core/` (parsing `PAD_INFO.BIN` et chunk `RLND`), voir
     ré-habillées par thème ; les composants imbriqués (modales, menu déroulant, boutons de
     bascule) gardent leur habillage sombre d'origine sur tous les thèmes — ré-habiller chaque
     dégradé imbriqué à la main était hors de portée raisonnable de ce chantier.
-15. Patterns (menu "Patterns…", lecture seule) : liste les 12 slots de la banque actuellement
-    affichée à l'écran (`WebUIBridge::listPatterns`, voir Roadmap ci-dessous pour le détail du
-    format `PTN`/`sp404::Pattern`). Chaque slot avec un pattern enregistré affiche son nombre de
+15. Patterns (menu "Patterns…") : liste les 12 slots de la banque actuellement affichée à
+    l'écran (`WebUIBridge::listPatterns`, voir Roadmap ci-dessous pour le détail du format
+    `PTN`/`sp404::Pattern`). Chaque slot avec un pattern enregistré affiche son nombre de
     mesures et les pads distincts qu'il référence ; un pad référencé mais sans sample est
     signalé (bordure rouge + `!`). L'adressage slot → fichier (`patternSlotPath`) reste une
     hypothèse best-effort au-delà de la banque A (voir `docs/sp404sx-format.md`), donc les
     patterns d'autres banques pourraient s'afficher au mauvais slot tant qu'un vrai pattern
-    hors banque A n'a pas été vérifié.
+    hors banque A n'a pas été vérifié. Chaque ligne a un bouton "Save…" (si un pattern existe)
+    qui exporte un `.zip` bundlant le pattern et ses pads dépendants (`savePatternToZip`), et un
+    bouton "Load…" qui restaure un tel `.zip` dans **cette** ligne précise — le slot cible peut
+    différer du slot d'origine (voir Roadmap), mais les pads dépendants sont toujours restaurés
+    à leur banque/pad d'origine, potentiellement différente de la banque affichée. Écriture
+    immédiate, confirmée par une modale avant "Load…" (même règle "pas d'undo" que le reste).
 
 ### Provenance des stickers
 
@@ -325,10 +330,21 @@ docs/     spécification du format de carte SD SP-404SX et ses sources.
     remplacé après coup apparaît comme manquant dès la prochaine ouverture). Vérifié contre les
     3 vrais patterns de la carte (voir `docs/sp404sx-format.md`) : `A1` → 14 mesures/C6-C12,
     `A9` → 4 mesures/D9-D11, `A12` → 14 mesures/I6-I8, tous les pads référencés bien présents.
-  - Sauvegarder/charger un pattern : ne jamais exporter le `PTNxxxxx.BIN` seul — le bundler avec
-    les samples des pads référencés et leur tranche `PAD_INFO.BIN`, même logique que
-    `BankArchive::saveBankToZip`, sinon restaurer ailleurs (autre banque, autre carte) rejoue
-    n'importe quoi.
+  - ✅ Sauvegarder/charger un pattern (`plugin/PatternArchive.h`/`.cpp`, boutons "Save…"/"Load…"
+    sur chaque ligne du panneau "Patterns…") : `savePatternToZip` bundle le `PTNxxxxx.BIN` brut
+    du slot avec, pour chaque pad distinct qu'il référence, sa tranche `PAD_INFO.BIN` (32
+    octets) et son fichier échantillon — jamais le `PTNxxxxx.BIN` seul, sinon restaurer ailleurs
+    rejoue n'importe quoi. Contrairement à `BankArchive::saveBankToZip`, les pads référencés
+    gardent leur identité banque+pad absolue dans le zip (pas de repositionnement) : les octets
+    bruts du pattern codent en dur quelle banque/pad chaque événement joue (voir
+    `PatternEvent::bank()`/`padIndexInBank()`), donc charger ce bundle dans un *autre* slot ne
+    change pas ce qu'il joue — seul le remplacement des pads dépendants (même banque+pad
+    qu'à l'origine, écrasement complet comme `clearPad`) est nécessaire si ces pads manquent sur
+    la carte cible. `loadPatternFromZip` retourne les banques touchées (slot cible + banques des
+    pads dépendants, potentiellement différentes) pour que l'UI sache quoi rafraîchir. Testé par
+    un round-trip complet (sauvegarde de `A1` depuis la vraie carte, chargement dans un slot
+    différent `B5` sur une carte synthétique, vérification des octets/samples/PadInfo restaurés)
+    via un harnais offline jetable avant intégration à l'UI.
   - Renommer/dupliquer/réorganiser un pattern entre slots, et suppression — symétrique de ce qui
     existe déjà pour les banks (menu de gestion des banks).
   - Aperçu en lecture seule d'un pattern dans l'UI (mini-timeline) avant chargement.

@@ -827,6 +827,26 @@
       applyTheme((result && result.theme) || "hardware");
     }
 
+    // 'A'-'J' if the screen readout is currently showing a bank letter (as opposed to a pad
+    // number/other readout), else null. Shared by wireBankMenu and wirePatternsPanel.
+    function currentBank() {
+      const letter = screenReadoutEl.textContent;
+      return /^[A-J]$/.test(letter) ? letter : null;
+    }
+
+    // Re-syncs playback + the on-screen pad grid after a native operation changed files on disk
+    // out from under BankLoader -- same refresh pattern already used after a drag&drop swap (see
+    // wirePadDragDrop): re-invoke selectBank/listPads rather than adding a new mechanism. Shared
+    // by wireBankMenu (whole-bank save/load) and wirePatternsPanel (a loaded pattern's dependency
+    // pads can touch a bank other than the one currently on screen).
+    function refreshAfterFileChange(bank) {
+      pollConnection(); // SD free-space readout shouldn't wait for the next 2s poll
+      if (!bank) return;
+      window.getNativeFunction("selectBank")(bank);
+      if (bank === currentBank())
+        window.getNativeFunction("listPads")(bank).then((data) => renderPads(bank, data));
+    }
+
     // Bank-management menu (top-left): save/load/clear the whole card or a single bank. Every
     // destructive action (clear/replace) is gated by showConfirm first -- none of this has an
     // undo, same rule as every other write path in this app.
@@ -838,22 +858,6 @@
         dropdown.classList.toggle("open");
       });
       document.addEventListener("click", () => dropdown.classList.remove("open"));
-
-      function currentBank() {
-        const letter = screenReadoutEl.textContent;
-        return /^[A-J]$/.test(letter) ? letter : null;
-      }
-
-      // Re-syncs playback + the on-screen pad grid after a native operation changed files on disk
-      // out from under BankLoader -- same refresh pattern already used after a drag&drop swap
-      // (see wirePadDragDrop): re-invoke selectBank/listPads rather than adding a new mechanism.
-      function refreshAfterFileChange(bank) {
-        pollConnection(); // SD free-space readout shouldn't wait for the next 2s poll
-        if (!bank) return;
-        window.getNativeFunction("selectBank")(bank);
-        if (bank === currentBank())
-          window.getNativeFunction("listPads")(bank).then((data) => renderPads(bank, data));
-      }
 
       const actions = {
         "save-all": async () => {
@@ -1064,55 +1068,120 @@
         `${formatMs(result.leadingSilenceSeconds)} lead / ${formatMs(result.trailingSilenceSeconds)} trail silence`;
     }
 
-    // Read-only pattern-slot viewer (menu -> "Patterns…") -- lists the 12 PTNxxxxx.BIN slots
-    // that belong to the bank currently shown on the screen readout (see
-    // WebUIBridge::listPatterns), flagging any referenced pad that currently has no sample.
-    function openPatternsPanel() {
-      const bank = /^[A-J]$/.test(screenReadoutEl.textContent) ? screenReadoutEl.textContent : null;
-      if (!bank) {
-        statusEl.textContent = "Select a bank first to view its patterns.";
-        return;
-      }
+    // Read-only pattern-slot viewer + per-slot save/load (menu -> "Patterns…") -- lists the 12
+    // PTNxxxxx.BIN slots that belong to the bank currently shown on the screen readout (see
+    // WebUIBridge::listPatterns), flagging any referenced pad that currently has no sample. Each
+    // row's Save/Load button targets exactly that slot -- see sp404::savePatternToZip/
+    // loadPatternFromZip's doc comments for why the target slot doesn't need to match the slot a
+    // loaded pattern was originally saved from.
+    let patternsPanelBank = null; // which bank the currently-open panel is showing
 
-      document.getElementById("patterns-modal-title").textContent = `Patterns — Bank ${bank}`;
+    function renderPatternsList(bank, patterns) {
       const listEl = document.getElementById("patterns-list");
-      listEl.innerHTML = `<p class="pattern-detail">Loading…</p>`;
-      document.getElementById("patterns-modal").classList.remove("hidden");
-
-      window.getNativeFunction("listPatterns")(bank).then((data) => {
-        if (!data || !data.patterns) {
-          listEl.innerHTML = `<p class="pattern-detail">Failed to load patterns.</p>`;
-          return;
-        }
-        listEl.innerHTML = data.patterns
-          .map((slot) => {
-            const label = `${bank}${slot.indexInBank}`;
-            if (!slot.exists)
-              return `<div class="pattern-row empty"><span class="pattern-label">${label}</span><span class="pattern-detail">(no pattern)</span></div>`;
-
-            const refs = slot.referencedPads || [];
-            const anyMissing = refs.some((p) => !p.hasSample);
+      listEl.innerHTML = patterns
+        .map((slot) => {
+          const label = `${bank}${slot.indexInBank}`;
+          const refs = slot.referencedPads || [];
+          const anyMissing = refs.some((p) => !p.hasSample);
+          let detail;
+          if (!slot.exists) {
+            detail = "(no pattern)";
+          } else {
             const refsHtml = refs.length
               ? refs
                   .map((p) => `<span class="pattern-ref${p.hasSample ? "" : " missing"}">${p.bank}${p.indexInBank}${p.hasSample ? "" : "!"}</span>`)
                   .join(" ")
               : "no pads referenced";
-            const barsLabel = `${slot.bars} bar${slot.bars === 1 ? "" : "s"}`;
-            return `<div class="pattern-row${anyMissing ? " warn" : ""}">
-              <span class="pattern-label">${label}</span>
-              <span class="pattern-detail">${barsLabel} · ${refsHtml}</span>
-            </div>`;
-          })
-          .join("");
+            detail = `${slot.bars} bar${slot.bars === 1 ? "" : "s"} · ${refsHtml}`;
+          }
+          const saveBtn = slot.exists
+            ? `<button type="button" class="pattern-btn" data-action="save-pattern">Save…</button>`
+            : "";
+          return `<div class="pattern-row${!slot.exists ? " empty" : anyMissing ? " warn" : ""}" data-index-in-bank="${slot.indexInBank}">
+            <span class="pattern-label">${label}</span>
+            <span class="pattern-detail">${detail}</span>
+            <span class="pattern-actions">
+              ${saveBtn}
+              <button type="button" class="pattern-btn" data-action="load-pattern">Load…</button>
+            </span>
+          </div>`;
+        })
+        .join("");
+    }
+
+    function refreshPatternsList() {
+      if (!patternsPanelBank) return;
+      const bank = patternsPanelBank;
+      window.getNativeFunction("listPatterns")(bank).then((data) => {
+        if (patternsPanelBank !== bank) return; // panel was reopened for a different bank meanwhile
+        if (!data || !data.patterns) {
+          document.getElementById("patterns-list").innerHTML = `<p class="pattern-detail">Failed to load patterns.</p>`;
+          return;
+        }
+        renderPatternsList(bank, data.patterns);
       });
+    }
+
+    function openPatternsPanel() {
+      const bank = currentBank();
+      if (!bank) {
+        statusEl.textContent = "Select a bank first to view its patterns.";
+        return;
+      }
+
+      patternsPanelBank = bank;
+      document.getElementById("patterns-modal-title").textContent = `Patterns — Bank ${bank}`;
+      document.getElementById("patterns-list").innerHTML = `<p class="pattern-detail">Loading…</p>`;
+      document.getElementById("patterns-modal").classList.remove("hidden");
+      refreshPatternsList();
     }
 
     function closePatternsPanel() {
       document.getElementById("patterns-modal").classList.add("hidden");
+      patternsPanelBank = null;
     }
 
     function wirePatternsPanel() {
       document.getElementById("patterns-close-btn").addEventListener("click", closePatternsPanel);
+
+      document.getElementById("patterns-list").addEventListener("click", async (e) => {
+        const btn = e.target.closest("button[data-action]");
+        if (!btn || !patternsPanelBank) return;
+        const bank = patternsPanelBank;
+        const indexInBank = Number(btn.closest(".pattern-row").dataset.indexInBank);
+
+        if (btn.dataset.action === "save-pattern") {
+          const picked = await window.getNativeFunction("pickZipToSave")(`SP404_Pattern_${bank}${indexInBank}.zip`);
+          if (picked.cancelled) return;
+          const result = await window.getNativeFunction("savePatternToZip")(bank, indexInBank, picked.path);
+          statusEl.textContent =
+            result && result.ok ? `Saved pattern ${bank}${indexInBank} to ${picked.path}.` : `Failed to save pattern ${bank}${indexInBank}.`;
+        } else if (btn.dataset.action === "load-pattern") {
+          const picked = await window.getNativeFunction("pickZipToOpen")();
+          if (picked.cancelled) return;
+          const info = await window.getNativeFunction("peekPatternZip")(picked.path);
+          if (!info || !info.valid) {
+            statusEl.textContent = "Not a valid pattern backup (use Load A Bank/Load All Banks for a bank/card backup).";
+            return;
+          }
+          const confirmed = await showConfirm(
+            `This replaces pattern ${bank}${indexInBank} with ${info.savedFromBank}${info.savedFromIndexInBank}'s backup ` +
+              `(${info.bars} bar${info.bars === 1 ? "" : "s"}), and restores its referenced pads' samples/settings ` +
+              `to wherever they originally lived. This cannot be undone. Continue?`
+          );
+          if (!confirmed) return;
+
+          const result = await window.getNativeFunction("loadPatternFromZip")(picked.path, bank, indexInBank);
+          statusEl.textContent =
+            result && result.ok
+              ? `Pattern ${bank}${indexInBank} restored from ${info.savedFromBank}${info.savedFromIndexInBank}'s backup.`
+              : `Failed to load into pattern ${bank}${indexInBank}.`;
+          if (result && result.ok) {
+            refreshPatternsList();
+            for (const touchedBank of result.touchedBanks || []) refreshAfterFileChange(touchedBank);
+          }
+        }
+      });
     }
 
     function openDspPanel(bank, indexInBank) {
