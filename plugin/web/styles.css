@@ -673,6 +673,32 @@
     #dsp-bpm-result { font-size: 11px; color: var(--orange); font-variant-numeric: tabular-nums; }
     .dsp-note { font-size: 9px !important; color: var(--text-dim) !important; margin-top: 4px !important; }
 
+    /* Read-only pattern-slot list (see openPatternsPanel/wirePatternsPanel in app.js). */
+    .patterns-panel { width: 280px; }
+    #patterns-list { display: flex; flex-direction: column; gap: 3px; max-height: 320px; overflow-y: auto; }
+    .pattern-row {
+      display: flex;
+      align-items: baseline;
+      gap: 8px;
+      padding: 4px 6px;
+      border-radius: 4px;
+      background: linear-gradient(160deg, #2c2b2e, #1c1b1e);
+      border: 1px solid var(--border);
+    }
+    .pattern-row.empty { opacity: 0.5; }
+    .pattern-row.warn { border-color: #d94f4f; }
+    .pattern-label {
+      flex: 0 0 auto;
+      font-size: 11px;
+      font-weight: 700;
+      color: var(--orange);
+      font-variant-numeric: tabular-nums;
+      min-width: 24px;
+    }
+    .pattern-detail { font-size: 10px; color: var(--text-dim); }
+    .pattern-ref { color: var(--text-dim); }
+    .pattern-ref.missing { color: #ff6b6b; font-weight: 700; }
+
     /* Scattered decorative stickers (Kawaii/Japandi themes only, see renderStickerLayer in
        app.js) -- fixed behind all real content (negative z-index survives regardless of DOM
        order/other elements' own stacking), never intercepts clicks. Hidden entirely for every

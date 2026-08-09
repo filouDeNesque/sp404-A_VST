@@ -3,13 +3,16 @@
 #include <cmath>
 #include <cstring>
 #include <filesystem>
+#include <set>
 #include <system_error>
+#include <utility>
 
 #include "BankArchive.h"
 #include "BinaryData.h"
 #include "PluginProcessor.h"
 #include "SampleDsp.h"
 #include "SampleImport.h"
+#include "sp404/Pattern.h"
 #include "sp404/SdCard.h"
 #include "sp404/WavInfo.h"
 
@@ -196,6 +199,82 @@ void listPads(PluginProcessor& processor, const juce::Array<juce::var>& args,
     }
 
     response->setProperty("pads", padsVar);
+    completion(juce::var(response));
+}
+
+// args: [bankChar]. Lists every pattern "slot" (1..Bank::padCount) that would belong to the given
+// bank on the SP-404SX's pad grid (see sp404::patternSlotPath -- best-available hypothesis, see
+// docs/sp404sx-format.md), whether or not a pattern is actually recorded there. For slots that do
+// have a PTNxxxxx.BIN, cross-references every distinct pad the pattern's real (non-placeholder)
+// events reference against the card's actual samples, so the UI can flag "references a pad with
+// no sample" without a separate pass. Re-reads from disk every call (same "always live"
+// philosophy as listPads above), so a sample swapped out after a pattern was recorded shows up as
+// missing immediately, not just at import time.
+void listPatterns(PluginProcessor& processor, const juce::Array<juce::var>& args,
+                   juce::WebBrowserComponent::NativeFunctionCompletion completion) {
+    auto* response = new juce::DynamicObject();
+    const auto cardRoot = processor.resolveCardRoot();
+    response->setProperty("connected", cardRoot.has_value());
+
+    juce::Array<juce::var> slotsVar;
+
+    if (cardRoot.has_value() && args.size() > 0 && args[0].toString().length() == 1) {
+        const char bankChar = static_cast<char>(args[0].toString()[0]);
+
+        try {
+            const SdCard card = SdCard::load(*cardRoot);
+
+            for (int indexInBank = 1; indexInBank <= Bank::padCount; ++indexInBank) {
+                auto* slotVar = new juce::DynamicObject();
+                slotVar->setProperty("indexInBank", indexInBank);
+
+                const auto pattern = readPattern(patternSlotPath(*cardRoot, bankChar, indexInBank));
+                slotVar->setProperty("exists", pattern.has_value());
+
+                if (pattern) {
+                    slotVar->setProperty("bars", pattern->bars);
+                    slotVar->setProperty("timeSignature", pattern->timeSignature);
+
+                    // Deduplicated set of every pad this pattern's real events reference, each
+                    // flagged with whether that pad currently has a sample.
+                    std::set<std::pair<char, int>> distinctPads;
+                    for (const auto& event : pattern->events) {
+                        const auto padBank = event.bank();
+                        const auto padIndex = event.padIndexInBank();
+                        if (padBank && padIndex)
+                            distinctPads.insert({*padBank, *padIndex});
+                    }
+
+                    juce::Array<juce::var> padsVar;
+                    for (const auto& [padBank, padIndex] : distinctPads) {
+                        bool hasSample = false;
+                        for (const auto& b : card.banks()) {
+                            if (b.name != padBank)
+                                continue;
+                            hasSample = b.pads[static_cast<size_t>(padIndex - 1)].samplePath.has_value();
+                            break;
+                        }
+
+                        auto* padVar = new juce::DynamicObject();
+                        const char bankBuf[2]{padBank, '\0'};
+                        padVar->setProperty("bank", juce::String(bankBuf));
+                        padVar->setProperty("indexInBank", padIndex);
+                        padVar->setProperty("hasSample", hasSample);
+                        padsVar.add(juce::var(padVar));
+                    }
+                    slotVar->setProperty("referencedPads", padsVar);
+                }
+
+                slotsVar.add(juce::var(slotVar));
+            }
+        } catch (const std::exception&) {
+            // PAD_INFO.BIN vanished or changed shape between findConnectedCardRoot() and here --
+            // report as disconnected rather than crash. Same pattern as listPads above.
+            response->setProperty("connected", false);
+        }
+    }
+
+    response->setProperty("patterns", slotsVar);
     completion(juce::var(response));
 }
 
@@ -777,6 +856,11 @@ juce::WebBrowserComponent::Options makeWebViewOptions(PluginProcessor& processor
                              [&processor](const juce::Array<juce::var>& args,
                                           juce::WebBrowserComponent::NativeFunctionCompletion completion) {
                                  listPads(processor, args, completion);
+                             })
+        .withNativeFunction("listPatterns",
+                             [&processor](const juce::Array<juce::var>& args,
+                                          juce::WebBrowserComponent::NativeFunctionCompletion completion) {
+                                 listPatterns(processor, args, completion);
                              })
         .withNativeFunction("selectBank",
                              [&processor](const juce::Array<juce::var>& args,

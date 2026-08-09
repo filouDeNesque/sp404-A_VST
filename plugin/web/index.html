@@ -24,6 +24,7 @@
       <button type="button" data-action="toggle-sync-mode" id="toggle-sync-mode-btn">Go Offline…</button>
       <button type="button" data-action="sync-to-card" id="sync-to-card-btn">Sync Mirror → Card…</button>
       <hr />
+      <button type="button" data-action="open-patterns">Patterns…</button>
       <button type="button" data-action="open-theme-picker">Theme…</button>
     </div>
     <div id="mode-badge" title="Live: editing the connected SD card directly">LIVE</div>
@@ -96,6 +97,18 @@
       <div id="theme-grid"></div>
       <div class="modal-actions">
         <button type="button" id="theme-close-btn">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="patterns-modal" class="modal-overlay hidden">
+    <div class="modal-panel patterns-panel">
+      <p id="patterns-modal-title">Patterns</p>
+      <div id="patterns-list"></div>
+      <p class="dsp-note">Read-only view of the bank's 12 pattern slots (ROLAND/SP-404SX/PTN) —
+        pad-to-slot addressing is a best-available hypothesis, see docs/sp404sx-format.md.</p>
+      <div class="modal-actions">
+        <button type="button" id="patterns-close-btn">Close</button>
       </div>
     </div>
   </div>

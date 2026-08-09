@@ -952,6 +952,7 @@
           statusEl.textContent =
             result && result.ok ? "Mirror synced to the connected card." : "Sync failed (is a card connected?).";
         },
+        "open-patterns": () => openPatternsPanel(),
         "open-theme-picker": () => openThemePicker(),
       };
 
@@ -1061,6 +1062,57 @@
       statusResultEl.textContent =
         `${channelsLabel} (${result.channels}ch) · peak ${formatDb(result.peakDb)} · ` +
         `${formatMs(result.leadingSilenceSeconds)} lead / ${formatMs(result.trailingSilenceSeconds)} trail silence`;
+    }
+
+    // Read-only pattern-slot viewer (menu -> "Patterns…") -- lists the 12 PTNxxxxx.BIN slots
+    // that belong to the bank currently shown on the screen readout (see
+    // WebUIBridge::listPatterns), flagging any referenced pad that currently has no sample.
+    function openPatternsPanel() {
+      const bank = /^[A-J]$/.test(screenReadoutEl.textContent) ? screenReadoutEl.textContent : null;
+      if (!bank) {
+        statusEl.textContent = "Select a bank first to view its patterns.";
+        return;
+      }
+
+      document.getElementById("patterns-modal-title").textContent = `Patterns — Bank ${bank}`;
+      const listEl = document.getElementById("patterns-list");
+      listEl.innerHTML = `<p class="pattern-detail">Loading…</p>`;
+      document.getElementById("patterns-modal").classList.remove("hidden");
+
+      window.getNativeFunction("listPatterns")(bank).then((data) => {
+        if (!data || !data.patterns) {
+          listEl.innerHTML = `<p class="pattern-detail">Failed to load patterns.</p>`;
+          return;
+        }
+        listEl.innerHTML = data.patterns
+          .map((slot) => {
+            const label = `${bank}${slot.indexInBank}`;
+            if (!slot.exists)
+              return `<div class="pattern-row empty"><span class="pattern-label">${label}</span><span class="pattern-detail">(no pattern)</span></div>`;
+
+            const refs = slot.referencedPads || [];
+            const anyMissing = refs.some((p) => !p.hasSample);
+            const refsHtml = refs.length
+              ? refs
+                  .map((p) => `<span class="pattern-ref${p.hasSample ? "" : " missing"}">${p.bank}${p.indexInBank}${p.hasSample ? "" : "!"}</span>`)
+                  .join(" ")
+              : "no pads referenced";
+            const barsLabel = `${slot.bars} bar${slot.bars === 1 ? "" : "s"}`;
+            return `<div class="pattern-row${anyMissing ? " warn" : ""}">
+              <span class="pattern-label">${label}</span>
+              <span class="pattern-detail">${barsLabel} · ${refsHtml}</span>
+            </div>`;
+          })
+          .join("");
+      });
+    }
+
+    function closePatternsPanel() {
+      document.getElementById("patterns-modal").classList.add("hidden");
+    }
+
+    function wirePatternsPanel() {
+      document.getElementById("patterns-close-btn").addEventListener("click", closePatternsPanel);
     }
 
     function openDspPanel(bank, indexInBank) {
@@ -1282,6 +1334,7 @@
       wireKnobs();
       wireBankMenu();
       wireDspPanel();
+      wirePatternsPanel();
       wireThemePicker();
 
       const stopAll = window.getNativeFunction("stopAll");

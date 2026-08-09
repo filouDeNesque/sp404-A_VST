@@ -209,6 +209,14 @@ Les tests couvrent `core/` (parsing `PAD_INFO.BIN` et chunk `RLND`), voir
     ré-habillées par thème ; les composants imbriqués (modales, menu déroulant, boutons de
     bascule) gardent leur habillage sombre d'origine sur tous les thèmes — ré-habiller chaque
     dégradé imbriqué à la main était hors de portée raisonnable de ce chantier.
+15. Patterns (menu "Patterns…", lecture seule) : liste les 12 slots de la banque actuellement
+    affichée à l'écran (`WebUIBridge::listPatterns`, voir Roadmap ci-dessous pour le détail du
+    format `PTN`/`sp404::Pattern`). Chaque slot avec un pattern enregistré affiche son nombre de
+    mesures et les pads distincts qu'il référence ; un pad référencé mais sans sample est
+    signalé (bordure rouge + `!`). L'adressage slot → fichier (`patternSlotPath`) reste une
+    hypothèse best-effort au-delà de la banque A (voir `docs/sp404sx-format.md`), donc les
+    patterns d'autres banques pourraient s'afficher au mauvais slot tant qu'un vrai pattern
+    hors banque A n'a pas été vérifié.
 
 ### Provenance des stickers
 
@@ -308,11 +316,15 @@ docs/     spécification du format de carte SD SP-404SX et ses sources.
     Hypothèse **corroborée par deux sources indépendantes** (nos 3 fichiers réels + la formule
     de `spEdit404`, voir `docs/sp404sx-format.md`) mais non prouvée au-delà de la banque A —
     aucun pattern réel disponible dans une autre banque pour confirmer au-delà du slot 12.
-  - Visualisation dans le plugin : lister les patterns d'une banque (en s'appuyant sur
-    `patternSlotPath`/`readPattern` ci-dessus), afficher leur longueur et les pads qu'ils
-    référencent ; détecter et signaler en continu (pas seulement à l'import) un pad référencé
-    sans sample, ou dont le sample a changé depuis. Reste à faire : le handler
-    `WebUIBridge`/panneau JS lui-même — les deux briques `core/` nécessaires existent déjà.
+  - ✅ Visualisation dans le plugin : menu "Patterns…" (nouveau `WebUIBridge::listPatterns`,
+    args `[bankChar]`) liste les 12 slots de la banque actuellement affichée à l'écran, avec
+    leur longueur en mesures et chaque pad distinct qu'ils référencent ; un pad référencé mais
+    sans sample est signalé en rouge (bordure de la ligne + `!` sur le pad concerné). Relit le
+    disque à chaque ouverture du panneau (même philosophie "toujours à jour" que `listPads` —
+    pas seulement au moment où le pattern a été importé/enregistré, donc un sample supprimé/
+    remplacé après coup apparaît comme manquant dès la prochaine ouverture). Vérifié contre les
+    3 vrais patterns de la carte (voir `docs/sp404sx-format.md`) : `A1` → 14 mesures/C6-C12,
+    `A9` → 4 mesures/D9-D11, `A12` → 14 mesures/I6-I8, tous les pads référencés bien présents.
   - Sauvegarder/charger un pattern : ne jamais exporter le `PTNxxxxx.BIN` seul — le bundler avec
     les samples des pads référencés et leur tranche `PAD_INFO.BIN`, même logique que
     `BankArchive::saveBankToZip`, sinon restaurer ailleurs (autre banque, autre carte) rejoue
