@@ -564,6 +564,41 @@ void handleLoadPattern(PluginProcessor& processor, const juce::Array<juce::var>&
     completion(juce::var(response));
 }
 
+// args: [bankChar, indexInBank]
+void handleDeletePattern(PluginProcessor& processor, const juce::Array<juce::var>& args,
+                          juce::WebBrowserComponent::NativeFunctionCompletion completion) {
+    bool ok = false;
+    if (const auto cardRoot = processor.resolveCardRoot(); cardRoot && args.size() > 1 && args[0].toString().length() == 1) {
+        try {
+            clearPatternSlot(*cardRoot, static_cast<char>(args[0].toString()[0]), static_cast<int>(args[1]));
+            ok = true;
+        } catch (const std::exception&) {
+            ok = false;
+        }
+    }
+    respondOk(ok, completion);
+}
+
+// args: [srcBankChar, srcIndexInBank, destBankChar, destIndexInBank]. Copies a pattern slot's raw
+// bytes onto another slot of the *same* card -- unlike savePatternToZip/loadPatternFromZip, no
+// dependency-pad bundling is needed here since both slots already share the same card (see
+// sp404::copyPatternSlot). The UI composes this with a follow-up "delete source" call for a
+// "move" rather than this handler doing both -- see wirePatternsPanel in app.js.
+void handleCopyPattern(PluginProcessor& processor, const juce::Array<juce::var>& args,
+                        juce::WebBrowserComponent::NativeFunctionCompletion completion) {
+    bool ok = false;
+    if (const auto cardRoot = processor.resolveCardRoot();
+        cardRoot && args.size() > 3 && args[0].toString().length() == 1 && args[2].toString().length() == 1) {
+        try {
+            ok = copyPatternSlot(*cardRoot, static_cast<char>(args[0].toString()[0]), static_cast<int>(args[1]),
+                                  static_cast<char>(args[2].toString()[0]), static_cast<int>(args[3]));
+        } catch (const std::exception&) {
+            ok = false;
+        }
+    }
+    respondOk(ok, completion);
+}
+
 // args: [bankChar]
 void handleClearBank(PluginProcessor& processor, const juce::Array<juce::var>& args,
                       juce::WebBrowserComponent::NativeFunctionCompletion completion) {
@@ -1035,6 +1070,16 @@ juce::WebBrowserComponent::Options makeWebViewOptions(PluginProcessor& processor
                              [&processor](const juce::Array<juce::var>& args,
                                           juce::WebBrowserComponent::NativeFunctionCompletion completion) {
                                  handleLoadPattern(processor, args, completion);
+                             })
+        .withNativeFunction("deletePattern",
+                             [&processor](const juce::Array<juce::var>& args,
+                                          juce::WebBrowserComponent::NativeFunctionCompletion completion) {
+                                 handleDeletePattern(processor, args, completion);
+                             })
+        .withNativeFunction("copyPattern",
+                             [&processor](const juce::Array<juce::var>& args,
+                                          juce::WebBrowserComponent::NativeFunctionCompletion completion) {
+                                 handleCopyPattern(processor, args, completion);
                              })
         .withNativeFunction("clearBank",
                              [&processor](const juce::Array<juce::var>& args,

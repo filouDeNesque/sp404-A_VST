@@ -220,8 +220,12 @@ Les tests couvrent `core/` (parsing `PAD_INFO.BIN` et chunk `RLND`), voir
     qui exporte un `.zip` bundlant le pattern et ses pads dépendants (`savePatternToZip`), et un
     bouton "Load…" qui restaure un tel `.zip` dans **cette** ligne précise — le slot cible peut
     différer du slot d'origine (voir Roadmap), mais les pads dépendants sont toujours restaurés
-    à leur banque/pad d'origine, potentiellement différente de la banque affichée. Écriture
-    immédiate, confirmée par une modale avant "Load…" (même règle "pas d'undo" que le reste).
+    à leur banque/pad d'origine, potentiellement différente de la banque affichée. "Copy…"/
+    "Move…" ouvrent un petit sélecteur (grille de pads 1-12, occupés marqués `N!`) pour
+    dupliquer/déplacer vers un autre slot **de la même banque** ; "Delete" supprime le
+    `PTNxxxxx.BIN` du slot. Écriture immédiate, chaque action destructive (Load…/Move…/Delete,
+    et Copy… vers un slot déjà occupé) confirmée par une modale (même règle "pas d'undo" que le
+    reste).
 
 ### Provenance des stickers
 
@@ -345,8 +349,17 @@ docs/     spécification du format de carte SD SP-404SX et ses sources.
     un round-trip complet (sauvegarde de `A1` depuis la vraie carte, chargement dans un slot
     différent `B5` sur une carte synthétique, vérification des octets/samples/PadInfo restaurés)
     via un harnais offline jetable avant intégration à l'UI.
-  - Renommer/dupliquer/réorganiser un pattern entre slots, et suppression — symétrique de ce qui
-    existe déjà pour les banks (menu de gestion des banks).
+  - ✅ Dupliquer/déplacer/supprimer un pattern entre slots (`sp404::copyPatternSlot`/
+    `clearPatternSlot`, `core/include/sp404/SdCard.h`) — boutons "Copy…"/"Move…"/"Delete" sur
+    chaque ligne du panneau "Patterns…", avec un sélecteur compact (grille 1-12) pour choisir le
+    pad cible **au sein de la même banque** (les slots déjà occupés sont marqués `N!` dans le
+    sélecteur). Réorganiser vers une **autre banque** fonctionne déjà via Save…+Load… (pas de
+    nouveau sélecteur banque+pad construit pour ce tour, volontairement — Save…/Load… couvre déjà
+    ce cas, y compris entre deux cartes). Pas de renommage : le format `PTN` n'a pas de champ nom
+    (voir `docs/sp404sx-format.md`), donc contrairement aux banks il n'y a rien à renommer.
+    "Move…" est composé côté JS (`copyPattern` puis `deletePattern`, pas de nouvel endpoint
+    natif dédié) ; "Copy…"/déplacer ne touchent jamais aux pads dépendants (contrairement à
+    Save…/Load…) puisque source et cible restent sur la même carte.
   - Aperçu en lecture seule d'un pattern dans l'UI (mini-timeline) avant chargement.
   - Export pattern → fichier MIDI standard (conversion déjà implémentée côté `AudioPattern`,
     réutilisable comme référence) et import MIDI → pattern SP-404 en sens inverse (quantisé sur

@@ -595,6 +595,25 @@
     }
     #bank-target-letters button:hover { border-color: var(--orange); color: var(--orange); }
 
+    #pattern-target-pads {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 5px;
+      margin-bottom: 12px;
+    }
+    #pattern-target-pads button {
+      background: linear-gradient(160deg, #302f33, #1c1b1e);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      color: var(--text);
+      font-weight: 700;
+      font-size: 11px;
+      padding: 6px 0;
+      cursor: pointer;
+    }
+    #pattern-target-pads button:hover { border-color: var(--orange); color: var(--orange); }
+    #pattern-target-pads button:disabled { opacity: 0.35; cursor: default; pointer-events: none; }
+
     /* Compact "open the DSP panel for this pad" button, sits at the end of .pad-controls next to
        the volume row -- reuses the same raised-button look as the modal-actions buttons rather
        than adding a new visual style. */
@@ -713,6 +732,8 @@
       cursor: pointer;
     }
     .pattern-btn:hover { border-color: var(--orange); color: var(--orange); }
+    .pattern-btn.danger { color: #ff8a6a; }
+    .pattern-btn.danger:hover { border-color: #ff8a6a; color: #ff8a6a; }
 
     /* Scattered decorative stickers (Kawaii/Japandi themes only, see renderStickerLayer in
        app.js) -- fixed behind all real content (negative z-index survives regardless of DOM

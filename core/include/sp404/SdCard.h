@@ -71,6 +71,21 @@ std::filesystem::path patternDir(const std::filesystem::path& sdRoot);
 // against. Throws std::invalid_argument if bankName/indexInBank are out of range.
 std::filesystem::path patternSlotPath(const std::filesystem::path& sdRoot, char bankName, int indexInBank);
 
+// Deletes the PTNxxxxx.BIN file at a pattern slot, if any -- a no-op (doesn't throw or fail) if
+// the slot was already empty. Throws std::invalid_argument if bankName/indexInBank are out of
+// range.
+void clearPatternSlot(const std::filesystem::path& sdRoot, char bankName, int indexInBank);
+
+// Copies one pattern slot's raw bytes onto another slot of the same card, overwriting whatever
+// was there. A pattern's bytes hard-code which bank/pad each event *plays* (see
+// docs/sp404sx-format.md), not which slot it's filed under, so copying to a different slot
+// doesn't change what it plays -- only which physical pattern pad triggers it (once pattern
+// triggering exists). Copying a slot onto itself is a no-op that still returns true. Returns
+// false if the source slot has no pattern. Throws std::invalid_argument if any bank/index is out
+// of range.
+bool copyPatternSlot(const std::filesystem::path& sdRoot, char srcBank, int srcIndexInBank, char destBank,
+                      int destIndexInBank);
+
 // Replaces a pad's sample with a raw WAV file (wavBytes is written verbatim, no re-encoding), and
 // updates that pad's PAD_INFO.BIN record to match the new file: origSampleStart/End (byte offsets
 // of the new file's "data" chunk, see docs/sp404sx-format.md) and channels/format are recomputed;

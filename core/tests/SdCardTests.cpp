@@ -146,6 +146,73 @@ TEST_CASE("patternSlotPath rejects an out-of-range bank or pad index", "[SdCard]
     std::filesystem::remove_all(root);
 }
 
+TEST_CASE("clearPatternSlot deletes the PTNxxxxx.BIN file, and is a no-op if already absent", "[SdCard]") {
+    const auto root = makeSyntheticCard();
+    const auto path = sp404::patternSlotPath(root, 'A', 1);
+    std::filesystem::create_directories(path.parent_path());
+    { std::ofstream out(path, std::ios::binary); out.write("xyz", 3); }
+    REQUIRE(std::filesystem::exists(path));
+
+    sp404::clearPatternSlot(root, 'A', 1);
+    CHECK_FALSE(std::filesystem::exists(path));
+
+    sp404::clearPatternSlot(root, 'A', 1); // already gone -- must not throw
+
+    CHECK_THROWS_AS(sp404::clearPatternSlot(root, 'A', 13), std::invalid_argument);
+
+    std::filesystem::remove_all(root);
+}
+
+TEST_CASE("copyPatternSlot copies raw bytes onto another slot, overwriting what was there",
+          "[SdCard]") {
+    const auto root = makeSyntheticCard();
+    const auto srcPath = sp404::patternSlotPath(root, 'A', 1);
+    std::filesystem::create_directories(srcPath.parent_path());
+    { std::ofstream out(srcPath, std::ios::binary); out.write("hello-pattern", 13); }
+
+    const auto destPath = sp404::patternSlotPath(root, 'B', 5);
+    { std::ofstream out(destPath, std::ios::binary); out.write("stale-content", 13); }
+
+    CHECK(sp404::copyPatternSlot(root, 'A', 1, 'B', 5));
+
+    std::ifstream in(destPath, std::ios::binary);
+    std::string contents((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    CHECK(contents == "hello-pattern");
+    CHECK(std::filesystem::exists(srcPath)); // source is untouched by a copy
+
+    std::filesystem::remove_all(root);
+}
+
+TEST_CASE("copyPatternSlot returns false if the source slot has no pattern", "[SdCard]") {
+    const auto root = makeSyntheticCard();
+    CHECK_FALSE(sp404::copyPatternSlot(root, 'A', 1, 'B', 5));
+    std::filesystem::remove_all(root);
+}
+
+TEST_CASE("copyPatternSlot onto itself is a no-op that still succeeds", "[SdCard]") {
+    const auto root = makeSyntheticCard();
+    const auto path = sp404::patternSlotPath(root, 'A', 1);
+    std::filesystem::create_directories(path.parent_path());
+    { std::ofstream out(path, std::ios::binary); out.write("same-slot", 9); }
+
+    CHECK(sp404::copyPatternSlot(root, 'A', 1, 'A', 1));
+
+    std::ifstream in(path, std::ios::binary);
+    std::string contents((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    CHECK(contents == "same-slot");
+
+    std::filesystem::remove_all(root);
+}
+
+TEST_CASE("copyPatternSlot rejects an out-of-range bank or pad index", "[SdCard]") {
+    const auto root = makeSyntheticCard();
+
+    CHECK_THROWS_AS(sp404::copyPatternSlot(root, 'Z', 1, 'A', 1), std::invalid_argument);
+    CHECK_THROWS_AS(sp404::copyPatternSlot(root, 'A', 1, 'A', 13), std::invalid_argument);
+
+    std::filesystem::remove_all(root);
+}
+
 TEST_CASE("replacePadSample writes the WAV file and updates PAD_INFO.BIN", "[SdCard]") {
     const auto root = makeSyntheticCard();
 

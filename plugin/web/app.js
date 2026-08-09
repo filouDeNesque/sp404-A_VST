@@ -1075,6 +1075,8 @@
     // loadPatternFromZip's doc comments for why the target slot doesn't need to match the slot a
     // loaded pattern was originally saved from.
     let patternsPanelBank = null; // which bank the currently-open panel is showing
+    let patternsPanelData = []; // last-fetched listPatterns() result for patternsPanelBank -- lets
+    // pickPatternPadTarget mark which pads are already occupied without a second native round-trip
 
     function renderPatternsList(bank, patterns) {
       const listEl = document.getElementById("patterns-list");
@@ -1094,14 +1096,17 @@
               : "no pads referenced";
             detail = `${slot.bars} bar${slot.bars === 1 ? "" : "s"} · ${refsHtml}`;
           }
-          const saveBtn = slot.exists
-            ? `<button type="button" class="pattern-btn" data-action="save-pattern">Save…</button>`
+          const existingActions = slot.exists
+            ? `<button type="button" class="pattern-btn" data-action="save-pattern">Save…</button>
+               <button type="button" class="pattern-btn" data-action="copy-pattern">Copy…</button>
+               <button type="button" class="pattern-btn" data-action="move-pattern">Move…</button>
+               <button type="button" class="pattern-btn danger" data-action="delete-pattern">Delete</button>`
             : "";
           return `<div class="pattern-row${!slot.exists ? " empty" : anyMissing ? " warn" : ""}" data-index-in-bank="${slot.indexInBank}">
             <span class="pattern-label">${label}</span>
             <span class="pattern-detail">${detail}</span>
             <span class="pattern-actions">
-              ${saveBtn}
+              ${existingActions}
               <button type="button" class="pattern-btn" data-action="load-pattern">Load…</button>
             </span>
           </div>`;
@@ -1118,6 +1123,7 @@
           document.getElementById("patterns-list").innerHTML = `<p class="pattern-detail">Failed to load patterns.</p>`;
           return;
         }
+        patternsPanelData = data.patterns;
         renderPatternsList(bank, data.patterns);
       });
     }
@@ -1130,6 +1136,7 @@
       }
 
       patternsPanelBank = bank;
+      patternsPanelData = [];
       document.getElementById("patterns-modal-title").textContent = `Patterns — Bank ${bank}`;
       document.getElementById("patterns-list").innerHTML = `<p class="pattern-detail">Loading…</p>`;
       document.getElementById("patterns-modal").classList.remove("hidden");
@@ -1141,6 +1148,42 @@
       patternsPanelBank = null;
     }
 
+    // Lets the user pick a destination pad (1-12) within patternsPanelBank for Copy…/Move… --
+    // cross-bank reorganizing already works via Save…+Load… (see wirePatternsPanel), this is just
+    // the fast in-place path within the bank currently open in the panel. excludeIndex (the
+    // source slot itself) is disabled rather than hidden, so the grid's numbering stays obvious.
+    // Occupied slots are marked so a destructive overwrite is visible before it's confirmed.
+    // Resolves the chosen pad number, or null if cancelled.
+    function pickPatternPadTarget(title, excludeIndex) {
+      return new Promise((resolve) => {
+        const overlay = document.getElementById("pattern-target-modal");
+        const padsEl = document.getElementById("pattern-target-pads");
+        const cancelBtn = document.getElementById("pattern-target-cancel-btn");
+        document.getElementById("pattern-target-title").textContent = title;
+        padsEl.innerHTML = "";
+
+        const finish = (index) => {
+          overlay.classList.add("hidden");
+          cancelBtn.removeEventListener("click", onCancel);
+          resolve(index);
+        };
+        const onCancel = () => finish(null);
+        cancelBtn.addEventListener("click", onCancel);
+
+        const occupied = new Set(patternsPanelData.filter((s) => s.exists).map((s) => s.indexInBank));
+        for (let index = 1; index <= 12; index++) {
+          const btn = document.createElement("button");
+          btn.type = "button";
+          btn.textContent = occupied.has(index) ? `${index}!` : String(index);
+          if (index === excludeIndex) btn.disabled = true;
+          btn.addEventListener("click", () => finish(index));
+          padsEl.appendChild(btn);
+        }
+
+        overlay.classList.remove("hidden");
+      });
+    }
+
     function wirePatternsPanel() {
       document.getElementById("patterns-close-btn").addEventListener("click", closePatternsPanel);
 
@@ -1149,14 +1192,15 @@
         if (!btn || !patternsPanelBank) return;
         const bank = patternsPanelBank;
         const indexInBank = Number(btn.closest(".pattern-row").dataset.indexInBank);
+        const action = btn.dataset.action;
 
-        if (btn.dataset.action === "save-pattern") {
+        if (action === "save-pattern") {
           const picked = await window.getNativeFunction("pickZipToSave")(`SP404_Pattern_${bank}${indexInBank}.zip`);
           if (picked.cancelled) return;
           const result = await window.getNativeFunction("savePatternToZip")(bank, indexInBank, picked.path);
           statusEl.textContent =
             result && result.ok ? `Saved pattern ${bank}${indexInBank} to ${picked.path}.` : `Failed to save pattern ${bank}${indexInBank}.`;
-        } else if (btn.dataset.action === "load-pattern") {
+        } else if (action === "load-pattern") {
           const picked = await window.getNativeFunction("pickZipToOpen")();
           if (picked.cancelled) return;
           const info = await window.getNativeFunction("peekPatternZip")(picked.path);
@@ -1180,6 +1224,35 @@
             refreshPatternsList();
             for (const touchedBank of result.touchedBanks || []) refreshAfterFileChange(touchedBank);
           }
+        } else if (action === "copy-pattern" || action === "move-pattern") {
+          const isMove = action === "move-pattern";
+          const target = await pickPatternPadTarget(`${isMove ? "Move" : "Copy"} ${bank}${indexInBank} to which pad?`, indexInBank);
+          if (target === null) return;
+
+          const targetOccupied = patternsPanelData.some((s) => s.indexInBank === target && s.exists);
+          if (targetOccupied) {
+            const confirmed = await showConfirm(`This overwrites pattern ${bank}${target}. This cannot be undone. Continue?`);
+            if (!confirmed) return;
+          }
+
+          const copyResult = await window.getNativeFunction("copyPattern")(bank, indexInBank, bank, target);
+          if (!copyResult || !copyResult.ok) {
+            statusEl.textContent = `Failed to ${isMove ? "move" : "copy"} pattern ${bank}${indexInBank}.`;
+            return;
+          }
+
+          if (isMove) await window.getNativeFunction("deletePattern")(bank, indexInBank);
+
+          statusEl.textContent = isMove
+            ? `Moved pattern ${bank}${indexInBank} to ${bank}${target}.`
+            : `Copied pattern ${bank}${indexInBank} to ${bank}${target}.`;
+          refreshPatternsList();
+        } else if (action === "delete-pattern") {
+          const confirmed = await showConfirm(`This deletes pattern ${bank}${indexInBank}. This cannot be undone. Continue?`);
+          if (!confirmed) return;
+          const result = await window.getNativeFunction("deletePattern")(bank, indexInBank);
+          statusEl.textContent = result && result.ok ? `Deleted pattern ${bank}${indexInBank}.` : `Failed to delete pattern ${bank}${indexInBank}.`;
+          if (result && result.ok) refreshPatternsList();
         }
       });
     }

@@ -149,6 +149,32 @@ std::filesystem::path patternSlotPath(const std::filesystem::path& sdRoot, char 
     return patternDir(sdRoot) / oss.str();
 }
 
+void clearPatternSlot(const std::filesystem::path& sdRoot, char bankName, int indexInBank) {
+    checkPadRange(bankName, indexInBank, "clearPatternSlot");
+    std::error_code removeEc;
+    std::filesystem::remove(patternSlotPath(sdRoot, bankName, indexInBank), removeEc);
+}
+
+bool copyPatternSlot(const std::filesystem::path& sdRoot, char srcBank, int srcIndexInBank, char destBank,
+                      int destIndexInBank) {
+    checkPadRange(srcBank, srcIndexInBank, "copyPatternSlot");
+    checkPadRange(destBank, destIndexInBank, "copyPatternSlot");
+
+    const auto srcPath = patternSlotPath(sdRoot, srcBank, srcIndexInBank);
+    std::error_code existsEc;
+    if (!std::filesystem::exists(srcPath, existsEc) || existsEc)
+        return false;
+
+    const auto destPath = patternSlotPath(sdRoot, destBank, destIndexInBank);
+    if (srcPath == destPath)
+        return true; // copying a slot onto itself -- nothing to do
+
+    std::filesystem::create_directories(destPath.parent_path());
+    std::error_code copyEc;
+    std::filesystem::copy_file(srcPath, destPath, std::filesystem::copy_options::overwrite_existing, copyEc);
+    return !copyEc;
+}
+
 void replacePadSample(const std::filesystem::path& sdRoot, char bankName, int indexInBank,
                        const std::vector<std::byte>& wavBytes) {
     checkPadRange(bankName, indexInBank, "replacePadSample");
