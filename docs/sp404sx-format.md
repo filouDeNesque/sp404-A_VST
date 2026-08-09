@@ -171,12 +171,31 @@ présents sur la carte (banques C, D et I respectivement, qui contiennent bien d
 - `PitchMode` en mode Step Sequencer (valeurs 129–152 documentées par `audio-pattern.js`) —
   aucun pattern en mode séquenceur vérifié ici, ce parseur les transmet tels quels sans les
   interpréter.
-- Numérotation des fichiers `PTNxxxxx.BIN` eux-mêmes (quel pad/bank physique déclenche quel
-  pattern) : toujours non vérifiée contre une vraie carte — voir Roadmap dans le README.
-  Observation en passant : dans nos 3 échantillons, le numéro du fichier (1, 9, 12) ne
-  correspond à *aucun* rapport évident avec la banque référencée par son contenu (C, D, I) —
-  cohérent avec l'hypothèse que le slot de stockage du pattern et les pads qu'il joue sont deux
-  espaces d'adressage indépendants.
+- **Numérotation des fichiers `PTNxxxxx.BIN` eux-mêmes** (quel pad/bank physique déclenche quel
+  pattern) : implémentée comme hypothèse dans `sp404::patternSlotPath()`
+  (`core/include/sp404/SdCard.h`) — **corroborée par deux sources indépendantes**, mais
+  toujours pas prouvée au-delà des 3 patterns réels dont on dispose (tous dans la banque A,
+  slots 1/9/12) :
+  - Nos 3 fichiers réels (`PTN00001`/`PTN00009`/`PTN00012.BIN`) confirment exactement la formule
+    `slot = banque(0-based) × 12 + pad(1-based)` pour la banque A (slots 1, 9, 12).
+  - [`spEdit404`](https://github.com/bobgonzalez/spEdit404) (outil Python tiers, testé par son
+    auteur contre du vrai matériel — voir ses [articles de
+    blog](http://byteflip.club/categories/sp-edit)) implémente la **même formule algébrique**
+    dans `get_pad_code()` (`binary_utilities.py`) : `bank_number * pads_per_bank + pad_number`.
+    Son formatage a cependant un bug apparent — le résultat est passé à `hex()` au lieu d'un
+    formatage décimal, ce qui produirait par exemple `PTN0000c.BIN` pour le slot 12 plutôt que
+    le `PTN00012.BIN` (décimal) réellement observé sur notre carte. Seule la relation
+    algébrique (banque × 12 + pad) est donc corroborée par cette source, pas son détail de
+    formatage exact.
+  - `core/tests/SdCardTests.cpp` verrouille ces 3 valeurs réelles (`patternSlotPath` ->
+    `PTN00001.BIN`/`PTN00009.BIN`/`PTN00012.BIN` pour A1/A9/A12) comme test de non-régression ;
+    les slots au-delà de la banque A (13-120) suivent la même formule mais restent non testés
+    contre du matériel réel.
+  - Observation en passant : dans nos 3 échantillons, le numéro du fichier (1, 9, 12) ne
+    correspond à *aucun* rapport évident avec la banque référencée par le *contenu* du pattern
+    (C, D, I) — cohérent avec l'hypothèse que le slot de stockage du pattern et les pads qu'il
+    joue sont deux espaces d'adressage indépendants (le slot suit la grille physique des pads
+    de la banque A-J habituelle, le contenu peut référencer n'importe quelle banque).
 - `SMPL/STPINFO.BIN` (124 octets sur la carte réelle) reste sans documentation trouvée et n'a
   pas été analysé.
 

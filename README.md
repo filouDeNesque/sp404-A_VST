@@ -302,9 +302,17 @@ docs/     spécification du format de carte SD SP-404SX et ses sources.
     `padIndexInBank()`, vélocité, durée) + nombre de mesures, testé dans
     `core/tests/PatternTests.cpp` contre les 3 mêmes fixtures réelles utilisées pour la
     vérification du format ci-dessus.
-  - Visualisation dans le plugin : lister les patterns d'une banque, afficher leur longueur et
-    les pads qu'ils référencent ; détecter et signaler en continu (pas seulement à l'import) un
-    pad référencé sans sample, ou dont le sample a changé depuis.
+  - ✅ Adressage slot → fichier : `sp404::patternSlotPath()`/`patternDir()`
+    (`core/include/sp404/SdCard.h`) donnent le chemin `PTNxxxxx.BIN` d'un slot banque/pad,
+    suivant la même grille que les pads d'échantillons (banque × 12 + pad, décimal 5 chiffres).
+    Hypothèse **corroborée par deux sources indépendantes** (nos 3 fichiers réels + la formule
+    de `spEdit404`, voir `docs/sp404sx-format.md`) mais non prouvée au-delà de la banque A —
+    aucun pattern réel disponible dans une autre banque pour confirmer au-delà du slot 12.
+  - Visualisation dans le plugin : lister les patterns d'une banque (en s'appuyant sur
+    `patternSlotPath`/`readPattern` ci-dessus), afficher leur longueur et les pads qu'ils
+    référencent ; détecter et signaler en continu (pas seulement à l'import) un pad référencé
+    sans sample, ou dont le sample a changé depuis. Reste à faire : le handler
+    `WebUIBridge`/panneau JS lui-même — les deux briques `core/` nécessaires existent déjà.
   - Sauvegarder/charger un pattern : ne jamais exporter le `PTNxxxxx.BIN` seul — le bundler avec
     les samples des pads référencés et leur tranche `PAD_INFO.BIN`, même logique que
     `BankArchive::saveBankToZip`, sinon restaurer ailleurs (autre banque, autre carte) rejoue

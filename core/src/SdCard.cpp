@@ -137,6 +137,18 @@ std::filesystem::path samplePath(const std::filesystem::path& sdRoot, char bankN
     return smplDir(sdRoot) / (sampleStem(bankName, indexInBank) + ext);
 }
 
+std::filesystem::path patternDir(const std::filesystem::path& sdRoot) {
+    return sdRoot / "ROLAND" / "SP-404SX" / "PTN";
+}
+
+std::filesystem::path patternSlotPath(const std::filesystem::path& sdRoot, char bankName, int indexInBank) {
+    checkPadRange(bankName, indexInBank, "patternSlotPath");
+    const int slot = (bankName - 'A') * Bank::padCount + indexInBank;
+    std::ostringstream oss;
+    oss << "PTN" << std::setw(5) << std::setfill('0') << slot << ".BIN";
+    return patternDir(sdRoot) / oss.str();
+}
+
 void replacePadSample(const std::filesystem::path& sdRoot, char bankName, int indexInBank,
                        const std::vector<std::byte>& wavBytes) {
     checkPadRange(bankName, indexInBank, "replacePadSample");

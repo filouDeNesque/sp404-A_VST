@@ -116,6 +116,36 @@ TEST_CASE("savePadInfo rejects an out-of-range bank or pad index", "[SdCard]") {
     std::filesystem::remove_all(root);
 }
 
+TEST_CASE("patternSlotPath matches real PTNxxxxx.BIN filenames from a physical SP-404SX card",
+          "[SdCard]") {
+    const auto root = makeSyntheticCard();
+
+    // A1, A9, A12 -- the 3 real pattern files this addressing scheme was verified against (see
+    // docs/sp404sx-format.md).
+    CHECK(sp404::patternSlotPath(root, 'A', 1).filename() == "PTN00001.BIN");
+    CHECK(sp404::patternSlotPath(root, 'A', 9).filename() == "PTN00009.BIN");
+    CHECK(sp404::patternSlotPath(root, 'A', 12).filename() == "PTN00012.BIN");
+
+    // Unverified beyond bank A (see the HYPOTHESIS note in SdCard.h), but this is the formula
+    // both community sources agree on: sequential across banks, 12 slots/bank.
+    CHECK(sp404::patternSlotPath(root, 'B', 1).filename() == "PTN00013.BIN");
+    CHECK(sp404::patternSlotPath(root, 'J', 12).filename() == "PTN00120.BIN");
+
+    CHECK(sp404::patternSlotPath(root, 'A', 1).parent_path() == sp404::patternDir(root));
+
+    std::filesystem::remove_all(root);
+}
+
+TEST_CASE("patternSlotPath rejects an out-of-range bank or pad index", "[SdCard]") {
+    const auto root = makeSyntheticCard();
+
+    CHECK_THROWS_AS(sp404::patternSlotPath(root, 'Z', 1), std::invalid_argument);
+    CHECK_THROWS_AS(sp404::patternSlotPath(root, 'A', 0), std::invalid_argument);
+    CHECK_THROWS_AS(sp404::patternSlotPath(root, 'A', 13), std::invalid_argument);
+
+    std::filesystem::remove_all(root);
+}
+
 TEST_CASE("replacePadSample writes the WAV file and updates PAD_INFO.BIN", "[SdCard]") {
     const auto root = makeSyntheticCard();
 

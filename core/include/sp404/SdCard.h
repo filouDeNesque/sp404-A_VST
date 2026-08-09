@@ -56,6 +56,21 @@ void savePadInfo(const std::filesystem::path& sdRoot, char bankName, int indexIn
 std::filesystem::path samplePath(const std::filesystem::path& sdRoot, char bankName, int indexInBank,
                                   PadInfo::Format format);
 
+// <sdRoot>/ROLAND/SP-404SX/PTN -- where every PTNxxxxx.BIN pattern file lives. See
+// docs/sp404sx-format.md's "PTN/PTNxxxxx.BIN" section.
+std::filesystem::path patternDir(const std::filesystem::path& sdRoot);
+
+// Path a pattern "slot" would have on disk, given the bank/pad that triggers it (the SP-404SX's
+// pattern pads reuse the sample pad grid, not a separate numbering) -- whether or not a pattern
+// is actually recorded there yet.
+//
+// HYPOTHESIS, not fully proven: sequential across all 10 banks, 12 slots/bank
+// (bankIndex*Bank::padCount + indexInBank, 5-digit zero-padded decimal). Corroborated by two
+// independent community sources (see docs/sp404sx-format.md) but only confirmed against real
+// files for slots 1-12 (bank A) -- that's all that existed on the one real card this was checked
+// against. Throws std::invalid_argument if bankName/indexInBank are out of range.
+std::filesystem::path patternSlotPath(const std::filesystem::path& sdRoot, char bankName, int indexInBank);
+
 // Replaces a pad's sample with a raw WAV file (wavBytes is written verbatim, no re-encoding), and
 // updates that pad's PAD_INFO.BIN record to match the new file: origSampleStart/End (byte offsets
 // of the new file's "data" chunk, see docs/sp404sx-format.md) and channels/format are recomputed;
