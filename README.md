@@ -225,7 +225,9 @@ Les tests couvrent `core/` (parsing `PAD_INFO.BIN` et chunk `RLND`), voir
     dupliquer/déplacer vers un autre slot **de la même banque** ; "Delete" supprime le
     `PTNxxxxx.BIN` du slot. Écriture immédiate, chaque action destructive (Load…/Move…/Delete,
     et Copy… vers un slot déjà occupé) confirmée par une modale (même règle "pas d'undo" que le
-    reste).
+    reste). Sous le détail texte de chaque slot occupé, une frise ("aperçu") place un repère par
+    événement réel à sa position temporelle dans le pattern, rouge si le pad qu'il joue n'a pas
+    de sample — pratique pour repérer un trou avant de charger/déclencher le pattern.
 
 ### Provenance des stickers
 
@@ -360,7 +362,16 @@ docs/     spécification du format de carte SD SP-404SX et ses sources.
     "Move…" est composé côté JS (`copyPattern` puis `deletePattern`, pas de nouvel endpoint
     natif dédié) ; "Copy…"/déplacer ne touchent jamais aux pads dépendants (contrairement à
     Save…/Load…) puisque source et cible restent sur la même carte.
-  - Aperçu en lecture seule d'un pattern dans l'UI (mini-timeline) avant chargement.
+  - ✅ Aperçu en lecture seule (mini-timeline) : chaque ligne du panneau "Patterns…" affiche une
+    frise sous le détail texte — un repère par événement réel, positionné à sa position absolue
+    en ticks (`sp404::absoluteEventTicks`/`Pattern::totalTicks()`, nouveaux dans
+    `core/include/sp404/Pattern.h`, testés contre les fixtures réelles), coloré en rouge si le
+    pad qu'il joue n'a pas de sample (même code couleur que les refs textuelles). Lignes de
+    mesure en fond (`repeating-linear-gradient`, une par mesure). `WebUIBridge::listPatterns`
+    expose `events`/`totalTicks` par slot pour ça, en plus de `referencedPads` déjà présent.
+    Limité pour l'instant aux patterns déjà sur la carte (le panneau "Patterns…") — pas encore
+    d'aperçu du contenu d'un `.zip` avant confirmation de "Load…" (nécessiterait de parser
+    `PATTERN.BIN` directement depuis le zip en mémoire, non fait dans ce tour).
   - Export pattern → fichier MIDI standard (conversion déjà implémentée côté `AudioPattern`,
     réutilisable comme référence) et import MIDI → pattern SP-404 en sens inverse (quantisé sur
     la grille de 384 ticks/bar, résolution note MIDI → pad à définir).

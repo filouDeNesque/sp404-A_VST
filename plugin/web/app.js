@@ -1078,6 +1078,25 @@
     let patternsPanelData = []; // last-fetched listPatterns() result for patternsPanelBank -- lets
     // pickPatternPadTarget mark which pads are already occupied without a second native round-trip
 
+    // Read-only "aperçu" strip: one mark per real event, positioned by its absolute tick over the
+    // pattern's total length, with 1px gridlines at each bar boundary. Marks for an event whose
+    // pad has no sample are colored the same red as the "!" refs, so a silent gap is visible
+    // before loading/triggering the pattern rather than only after.
+    function renderPatternTimeline(slot) {
+      const events = slot.events || [];
+      const totalTicks = slot.totalTicks || 1;
+      const gridPercent = 100 / Math.max(1, slot.bars || 1);
+      const gridStyle = `background-image: repeating-linear-gradient(to right, rgba(255,255,255,0.12) 0, rgba(255,255,255,0.12) 1px, transparent 1px, transparent ${gridPercent}%);`;
+      const marks = events
+        .map((ev) => {
+          const leftPct = (ev.tick / totalTicks) * 100;
+          const widthPct = Math.max((ev.lengthTicks / totalTicks) * 100, 0.8); // floor so short hits stay visible
+          return `<span class="pattern-timeline-mark${ev.hasSample ? "" : " missing"}" style="left:${leftPct}%;width:${widthPct}%;"></span>`;
+        })
+        .join("");
+      return `<div class="pattern-timeline" style="${gridStyle}">${marks}</div>`;
+    }
+
     function renderPatternsList(bank, patterns) {
       const listEl = document.getElementById("patterns-list");
       listEl.innerHTML = patterns
@@ -1102,9 +1121,11 @@
                <button type="button" class="pattern-btn" data-action="move-pattern">Move…</button>
                <button type="button" class="pattern-btn danger" data-action="delete-pattern">Delete</button>`
             : "";
+          const timeline = slot.exists ? renderPatternTimeline(slot) : "";
           return `<div class="pattern-row${!slot.exists ? " empty" : anyMissing ? " warn" : ""}" data-index-in-bank="${slot.indexInBank}">
             <span class="pattern-label">${label}</span>
             <span class="pattern-detail">${detail}</span>
+            ${timeline}
             <span class="pattern-actions">
               ${existingActions}
               <button type="button" class="pattern-btn" data-action="load-pattern">Load…</button>

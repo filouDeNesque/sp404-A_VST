@@ -235,6 +235,16 @@ void listPatterns(PluginProcessor& processor, const juce::Array<juce::var>& args
                 if (pattern) {
                     slotVar->setProperty("bars", pattern->bars);
                     slotVar->setProperty("timeSignature", pattern->timeSignature);
+                    slotVar->setProperty("totalTicks", pattern->totalTicks());
+
+                    auto hasSampleFor = [&card](char padBank, int padIndex) {
+                        for (const auto& b : card.banks()) {
+                            if (b.name != padBank)
+                                continue;
+                            return b.pads[static_cast<size_t>(padIndex - 1)].samplePath.has_value();
+                        }
+                        return false;
+                    };
 
                     // Deduplicated set of every pad this pattern's real events reference, each
                     // flagged with whether that pad currently has a sample.
@@ -248,22 +258,33 @@ void listPatterns(PluginProcessor& processor, const juce::Array<juce::var>& args
 
                     juce::Array<juce::var> padsVar;
                     for (const auto& [padBank, padIndex] : distinctPads) {
-                        bool hasSample = false;
-                        for (const auto& b : card.banks()) {
-                            if (b.name != padBank)
-                                continue;
-                            hasSample = b.pads[static_cast<size_t>(padIndex - 1)].samplePath.has_value();
-                            break;
-                        }
-
                         auto* padVar = new juce::DynamicObject();
                         const char bankBuf[2]{padBank, '\0'};
                         padVar->setProperty("bank", juce::String(bankBuf));
                         padVar->setProperty("indexInBank", padIndex);
-                        padVar->setProperty("hasSample", hasSample);
+                        padVar->setProperty("hasSample", hasSampleFor(padBank, padIndex));
                         padsVar.add(juce::var(padVar));
                     }
                     slotVar->setProperty("referencedPads", padsVar);
+
+                    // Per-event timeline (real events only, absolute tick position) for the
+                    // read-only mini-timeline preview -- see renderPatternTimeline in app.js.
+                    const auto ticks = absoluteEventTicks(*pattern);
+                    juce::Array<juce::var> eventsVar;
+                    for (size_t i = 0; i < pattern->events.size(); ++i) {
+                        const auto& event = pattern->events[i];
+                        const auto padBank = event.bank();
+                        const auto padIndex = event.padIndexInBank();
+                        if (!padBank || !padIndex)
+                            continue; // placeholder, or an unrecognized bankSwitch -- nothing to draw
+
+                        auto* eventVar = new juce::DynamicObject();
+                        eventVar->setProperty("tick", ticks[i]);
+                        eventVar->setProperty("lengthTicks", static_cast<int>(event.lengthTicks));
+                        eventVar->setProperty("hasSample", hasSampleFor(*padBank, *padIndex));
+                        eventsVar.add(juce::var(eventVar));
+                    }
+                    slotVar->setProperty("events", eventsVar);
                 }
 
                 slotsVar.add(juce::var(slotVar));

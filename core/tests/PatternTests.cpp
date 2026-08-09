@@ -120,6 +120,34 @@ TEST_CASE("readPattern parses a real SP-404SX pattern (bank C, 14 bars)", "[Patt
     std::filesystem::remove(path);
 }
 
+TEST_CASE("totalTicks/absoluteEventTicks match real SP-404SX pattern data (bank C, 14 bars)",
+          "[Pattern]") {
+    const auto path = writeFixture("sp404_core_test_ptn_bank_c_ticks.bin", kPtnRealBankC);
+    const auto pattern = sp404::readPattern(path);
+    REQUIRE(pattern.has_value());
+
+    CHECK(pattern->totalTicks() == 14 * sp404::kTicksPerBar);
+
+    const auto ticks = sp404::absoluteEventTicks(*pattern);
+    REQUIRE(ticks.size() == pattern->events.size());
+
+    // Non-decreasing (every delta is a non-negative uint8_t).
+    for (size_t i = 1; i < ticks.size(); ++i)
+        CHECK(ticks[i] >= ticks[i - 1]);
+
+    // The very first event (ticksSincePrevious = 0x0f = 15, see kPtnRealBankC) starts at tick 15,
+    // not 0 -- there's a placeholder before the first real hit.
+    CHECK(ticks[0] == 15);
+
+    // Summing every event's delta (real + placeholder) lands exactly on the pattern's total
+    // length -- this is the same arithmetic readPattern()'s bar-count derivation relies on (see
+    // docs/sp404sx-format.md), re-checked here from the public API rather than the file's footer
+    // byte directly.
+    CHECK(ticks.back() == pattern->totalTicks());
+
+    std::filesystem::remove(path);
+}
+
 TEST_CASE("readPattern parses a real SP-404SX pattern (bank D, 4 bars)", "[Pattern]") {
     const auto path = writeFixture("sp404_core_test_ptn_bank_d.bin", kPtnRealBankD);
     const auto pattern = sp404::readPattern(path);

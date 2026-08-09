@@ -51,6 +51,17 @@ std::optional<int> PatternEvent::padIndexInBank() const {
     return (*index % kPadsPerBank) + 1;
 }
 
+std::vector<int> absoluteEventTicks(const Pattern& pattern) {
+    std::vector<int> ticks;
+    ticks.reserve(pattern.events.size());
+    int running = 0;
+    for (const auto& event : pattern.events) {
+        running += event.ticksSincePrevious;
+        ticks.push_back(running);
+    }
+    return ticks;
+}
+
 PatternEvent PatternEvent::decode(const std::byte* data, size_t size) {
     if (data == nullptr || size != encodedSize)
         throw std::invalid_argument("PatternEvent::decode requires exactly encodedSize bytes");
@@ -85,8 +96,8 @@ std::optional<Pattern> readPattern(const std::filesystem::path& patternPath) {
     }
 
     // Byte 9 of the 16-byte footer holds the whole bar count on the SP-404SX -- verified against
-    // 3 real patterns: sum(every event's ticksSincePrevious) / 384 (= 96 PPQN * 4 beats/bar in
-    // 4/4) lands exactly on this byte's value every time. This differs from the MKii/OG layouts
+    // 3 real patterns: sum(every event's ticksSincePrevious) / kTicksPerBar lands exactly on this
+    // byte's value every time. This differs from the MKii/OG layouts
     // documented elsewhere (which use footer bytes 8 and 14 for the bar count) -- see
     // docs/sp404sx-format.md.
     const auto* footer = reinterpret_cast<const std::byte*>(bytes.data() + numEvents * PatternEvent::encodedSize);

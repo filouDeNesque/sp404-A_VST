@@ -8,6 +8,10 @@
 
 namespace sp404 {
 
+// 96 PPQN * 4 beats/bar in 4/4 -- see docs/sp404sx-format.md and readPattern()'s bar-count
+// derivation, which this same value was reverse-engineered from.
+inline constexpr int kTicksPerBar = 384;
+
 // One event decoded from a Roland SP-404SX ROLAND/SP-404SX/PTN/PTNxxxxx.BIN pattern file. 8
 // bytes on disk; unlike the rest of this codebase's Roland-format parsing (PadInfo, RlndChunk,
 // which are big-endian 32-bit fields), the only multi-byte field here is `lengthTicks`, and it's
@@ -49,7 +53,18 @@ struct Pattern {
     std::vector<PatternEvent> events;
     int bars = 0;          // whole bars in the pattern -- see docs/sp404sx-format.md
     int timeSignature = 0; // 0=4/4, 1=3/4, 2=2/4, 3=1/4, 4=5/4, 5=6/4, 7=7/4 (raw stored byte)
+
+    // Total pattern length in ticks (bars * kTicksPerBar) -- the denominator for positioning
+    // events on a timeline (see absoluteEventTicks below).
+    int totalTicks() const { return bars * kTicksPerBar; }
 };
+
+// Absolute tick position of each event in pattern.events, same order and count -- computed as the
+// cumulative sum of each event's ticksSincePrevious, since the raw format only encodes the delay
+// since the previous event, not an absolute position. Useful for rendering a timeline preview.
+// The last entry (which may be a placeholder) always equals pattern.totalTicks() on every real
+// pattern verified so far (see docs/sp404sx-format.md).
+std::vector<int> absoluteEventTicks(const Pattern& pattern);
 
 // Returns std::nullopt if patternPath isn't readable, is shorter than the 16-byte footer, or its
 // size isn't footer + a whole number of PatternEvent::encodedSize-byte records.

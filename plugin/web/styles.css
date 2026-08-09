@@ -720,6 +720,24 @@
     .pattern-ref { color: var(--text-dim); }
     .pattern-ref.missing { color: #ff6b6b; font-weight: 700; }
     .pattern-actions { flex: 0 0 auto; display: flex; gap: 4px; }
+    .pattern-timeline {
+      position: relative;
+      flex: 0 0 100%;
+      height: 14px;
+      border-radius: 3px;
+      background-color: #1a1a1c;
+      background-repeat: no-repeat;
+      border: 1px solid var(--border);
+      overflow: hidden;
+    }
+    .pattern-timeline-mark {
+      position: absolute;
+      top: 2px;
+      bottom: 2px;
+      background: var(--orange);
+      border-radius: 1px;
+    }
+    .pattern-timeline-mark.missing { background: #ff6b6b; }
     .pattern-btn {
       background: linear-gradient(160deg, #302f33, #1c1b1e);
       border: 1px solid var(--border);
