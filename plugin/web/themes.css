@@ -1,0 +1,221 @@
+/* 10 themes, each just a set of CSS custom-property overrides on [data-theme="..."] -- see the
+   default values in styles.css's :root for what every theme is overriding (that :root block IS
+   the "Hardware" theme, theme #1 below only restates it for discoverability/documentation).
+   Nothing here targets an actual selector other than [data-theme="..."] -- nucleus rules that
+   consume these variables (.pad, .knob-procedural, body, ...) live entirely in styles.css, so a
+   theme can never accidentally change *behavior*, only appearance. See app.js for the picker UI
+   and sp404::getTheme/setTheme (WebUIBridge.cpp) for persistence.
+
+   Scope note: this reskins the primary surfaces (page background, pads, knobs, accent/text/
+   border colors) but NOT every small nested-component gradient (modal panels, the bank-management
+   dropdown, toggle buttons) -- those keep their existing dark chrome across all themes. Re-theming
+   every single hardcoded shadow/gradient in the app was out of scope for this round. */
+
+[data-theme="hardware"] {
+  /* Unchanged -- the original photographed-knob, dark-chassis look. Values match styles.css's
+     :root exactly; listed here only so all 10 themes are discoverable in one file. */
+  --orange: #ff6a13;
+  --bg: #131214;
+  --panel: #232225;
+  --panel-raised: #2b2a2d;
+  --border: #38363a;
+  --text: #ece9e4;
+  --text-dim: #8f8c89;
+  --pad-bg-start: #333136;
+  --pad-bg-end: #201f22;
+  --pad-radius: 10px;
+  --pad-active-color: #4aa8ff;
+  --pad-active-glow: rgba(74, 168, 255, 0.55);
+  --ridge-base: #1a1a1c;
+  --bg-pattern: none;
+  --knob-fill: #2b2a2d;
+  --knob-stroke: #4a484c;
+  --knob-indicator: #ff6a13;
+}
+
+[data-theme="neon-cyber"] {
+  --orange: #ff2bd6;
+  --bg: #05050a;
+  --panel: #0d0d16;
+  --panel-raised: #14141f;
+  --border: #2a2a40;
+  --text: #eafcff;
+  --text-dim: #7fa8b3;
+  --pad-bg-start: #10101c;
+  --pad-bg-end: #05050a;
+  --pad-radius: 4px;
+  --pad-active-color: #00eaff;
+  --pad-active-glow: rgba(0, 234, 255, 0.6);
+  --ridge-base: #0a0a12;
+  --bg-pattern:
+    repeating-linear-gradient(0deg, rgba(0, 234, 255, 0.05) 0px, rgba(0, 234, 255, 0.05) 1px, transparent 1px, transparent 24px),
+    repeating-linear-gradient(90deg, rgba(255, 43, 214, 0.05) 0px, rgba(255, 43, 214, 0.05) 1px, transparent 1px, transparent 24px);
+  --knob-fill: #0d0d16;
+  --knob-stroke: #00eaff;
+  --knob-indicator: #ff2bd6;
+}
+
+[data-theme="vaporwave"] {
+  --orange: #ff71ce;
+  --bg: #2b1055;
+  --panel: #3a1c6e;
+  --panel-raised: #45227e;
+  --border: #6a3ea1;
+  --text: #fdf3ff;
+  --text-dim: #cbb3e6;
+  --pad-bg-start: #5b3aa0;
+  --pad-bg-end: #2f1665;
+  --pad-radius: 16px;
+  --pad-active-color: #01cdfe;
+  --pad-active-glow: rgba(1, 205, 254, 0.55);
+  --ridge-base: #24124a;
+  --bg-pattern: linear-gradient(160deg, #2b1055 0%, #6a3ea1 45%, #ff71ce 100%);
+  --knob-fill: #45227e;
+  --knob-stroke: #b967ff;
+  --knob-indicator: #01cdfe;
+}
+
+[data-theme="lofi-tape"] {
+  --orange: #c9702a;
+  --bg: #2c231c;
+  --panel: #3a2f24;
+  --panel-raised: #46392c;
+  --border: #5a4a38;
+  --text: #f2e6d3;
+  --text-dim: #b8a488;
+  --pad-bg-start: #4a3b2c;
+  --pad-bg-end: #2c231c;
+  --pad-radius: 14px;
+  --pad-active-color: #d98f4e;
+  --pad-active-glow: rgba(217, 143, 78, 0.5);
+  --ridge-base: #241d17;
+  --bg-pattern: repeating-radial-gradient(circle at 20% 30%, rgba(255, 255, 255, 0.025) 0, rgba(255, 255, 255, 0.025) 2px, transparent 2px, transparent 5px);
+  --knob-fill: #3a2f24;
+  --knob-stroke: #8a6b48;
+  --knob-indicator: #d98f4e;
+}
+
+[data-theme="kawaii"] {
+  --orange: #ff6fa5;
+  --bg: #fff3f7;
+  --panel: #ffe3ee;
+  --panel-raised: #ffd3e3;
+  --border: #ffb8d2;
+  --text: #5c3a4a;
+  --text-dim: #a3728a;
+  --pad-bg-start: #ffe6f0;
+  --pad-bg-end: #ffd1e6;
+  --pad-radius: 20px;
+  --pad-active-color: #6fd6ff;
+  --pad-active-glow: rgba(111, 214, 255, 0.55);
+  --ridge-base: #ffd8e8;
+  --bg-pattern: none; /* the scattered sticker layer carries this theme's background interest */
+  --knob-fill: #ffe3ee;
+  --knob-stroke: #ff9dc2;
+  --knob-indicator: #ff6fa5;
+}
+
+[data-theme="japandi"] {
+  --orange: #c96a4b;
+  --bg: #f3f1ea;
+  --panel: #e9e5d8;
+  --panel-raised: #ded9c8;
+  --border: #cfc9b4;
+  --text: #3f4a3d;
+  --text-dim: #7c8570;
+  --pad-bg-start: #eae6d8;
+  --pad-bg-end: #ded8c4;
+  --pad-radius: 6px;
+  --pad-active-color: #7c9473;
+  --pad-active-glow: rgba(124, 148, 115, 0.5);
+  --ridge-base: #ded8c4;
+  --bg-pattern: repeating-linear-gradient(45deg, rgba(63, 74, 61, 0.035) 0px, rgba(63, 74, 61, 0.035) 1px, transparent 1px, transparent 16px);
+  --knob-fill: #e9e5d8;
+  --knob-stroke: #a99f7c;
+  --knob-indicator: #c96a4b;
+}
+
+[data-theme="midnight-studio"] {
+  --orange: #3d8bff;
+  --bg: #060a16;
+  --panel: #0c1326;
+  --panel-raised: #101a33;
+  --border: #1e2d52;
+  --text: #dce6ff;
+  --text-dim: #7d8bb8;
+  --pad-bg-start: #0f1830;
+  --pad-bg-end: #060a16;
+  --pad-radius: 8px;
+  --pad-active-color: #3d8bff;
+  --pad-active-glow: rgba(61, 139, 255, 0.55);
+  --ridge-base: #080d1a;
+  --bg-pattern:
+    radial-gradient(1px 1px at 10% 20%, rgba(255, 255, 255, 0.5) 0, transparent 50%),
+    radial-gradient(1px 1px at 80% 60%, rgba(255, 255, 255, 0.4) 0, transparent 50%),
+    radial-gradient(1px 1px at 40% 80%, rgba(255, 255, 255, 0.3) 0, transparent 50%),
+    radial-gradient(1px 1px at 65% 15%, rgba(255, 255, 255, 0.4) 0, transparent 50%),
+    radial-gradient(1px 1px at 25% 55%, rgba(255, 255, 255, 0.3) 0, transparent 50%);
+  --knob-fill: #101a33;
+  --knob-stroke: #3d8bff;
+  --knob-indicator: #dce6ff;
+}
+
+[data-theme="sunset-funk"] {
+  --orange: #ffb703;
+  --bg: #3a1c3d;
+  --panel: #4a2650;
+  --panel-raised: #562d5e;
+  --border: #6e3a72;
+  --text: #fff0dc;
+  --text-dim: #d9b3d6;
+  --pad-bg-start: #a13e5c;
+  --pad-bg-end: #4a2650;
+  --pad-radius: 12px;
+  --pad-active-color: #ff6b35;
+  --pad-active-glow: rgba(255, 107, 53, 0.55);
+  --ridge-base: #331932;
+  --bg-pattern: linear-gradient(160deg, #ffb703 0%, #ff6b35 35%, #a13e5c 70%, #3a1c3d 100%);
+  --knob-fill: #562d5e;
+  --knob-stroke: #ffb703;
+  --knob-indicator: #2b1220;
+}
+
+[data-theme="mono-terminal"] {
+  --orange: #33ff66;
+  --bg: #000000;
+  --panel: #0a0a0a;
+  --panel-raised: #111111;
+  --border: #1e3d24;
+  --text: #33ff66;
+  --text-dim: #1f9e3c;
+  --pad-bg-start: #050505;
+  --pad-bg-end: #000000;
+  --pad-radius: 2px;
+  --pad-active-color: #33ff66;
+  --pad-active-glow: rgba(51, 255, 102, 0.55);
+  --ridge-base: #000000;
+  --bg-pattern: repeating-linear-gradient(0deg, rgba(51, 255, 102, 0.05) 0px, rgba(51, 255, 102, 0.05) 1px, transparent 1px, transparent 3px);
+  --knob-fill: #000000;
+  --knob-stroke: #33ff66;
+  --knob-indicator: #33ff66;
+}
+
+[data-theme="pastel-dreams"] {
+  --orange: #ff9ecb;
+  --bg: #eef1ff;
+  --panel: #e2e7ff;
+  --panel-raised: #d6ddff;
+  --border: #c3ccf5;
+  --text: #3d3d5c;
+  --text-dim: #8686ab;
+  --pad-bg-start: #e6ebff;
+  --pad-bg-end: #d3dbff;
+  --pad-radius: 18px;
+  --pad-active-color: #9ed6ff;
+  --pad-active-glow: rgba(158, 214, 255, 0.55);
+  --ridge-base: #d6ddff;
+  --bg-pattern: linear-gradient(135deg, #eef1ff 0%, #f5e6ff 50%, #e6f7ff 100%);
+  --knob-fill: #e2e7ff;
+  --knob-stroke: #b9c2f0;
+  --knob-indicator: #ff9ecb;
+}

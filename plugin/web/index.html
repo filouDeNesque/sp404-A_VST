@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>SP404 Companion</title>
+    <link rel="stylesheet" href="styles.css" />
+    <link rel="stylesheet" href="themes.css" />
+</head>
+<body>
+  <div id="sticker-layer"></div>
+  <div class="header-banner">
+    <img src="header.png" alt="SP-404 A" />
+    <div id="menu-btn" title="Bank management">
+      <svg viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </div>
+    <div id="menu-dropdown">
+      <button type="button" data-action="save-all">Save All Banks…</button>
+      <button type="button" data-action="load-all">Load All Banks…</button>
+      <button type="button" data-action="save-bank">Save This Bank…</button>
+      <button type="button" data-action="load-bank">Load A Bank…</button>
+      <button type="button" class="danger" data-action="clear-bank">Clear This Bank</button>
+      <button type="button" class="danger" data-action="clear-all">Clear All</button>
+      <hr />
+      <button type="button" data-action="toggle-sync-mode" id="toggle-sync-mode-btn">Go Offline…</button>
+      <button type="button" data-action="sync-to-card" id="sync-to-card-btn">Sync Mirror → Card…</button>
+      <hr />
+      <button type="button" data-action="open-theme-picker">Theme…</button>
+    </div>
+    <div id="mode-badge" title="Live: editing the connected SD card directly">LIVE</div>
+    <div id="sd-indicator" title="No SD card connected">
+      <svg viewBox="0 0 24 24"><path d="M16 2H8a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2V7l-5-5zM9 5h2v3H9V5zm3 0h2v3h-2V5zm4 14H8v-6h8v6z"/></svg>
+    </div>
+  </div>
+  <div id="knobs">
+    <div class="knob-wrap" data-knob-index="0">
+      <div class="knob-dial"><img class="knob knob-sprite" src="knob0.png" alt="" /><svg class="knob knob-procedural" viewBox="0 0 40 40"><circle class="knob-body" cx="20" cy="20" r="17" /><line class="knob-indicator" x1="20" y1="20" x2="20" y2="6" /></svg></div>
+      <span class="knob-label">Volume</span>
+      <span class="cc-dot"></span>
+    </div>
+    <div class="knob-wrap" data-knob-index="1">
+      <div class="knob-dial"><img class="knob knob-sprite" src="knob0.png" alt="" /><svg class="knob knob-procedural" viewBox="0 0 40 40"><circle class="knob-body" cx="20" cy="20" r="17" /><line class="knob-indicator" x1="20" y1="20" x2="20" y2="6" /></svg></div>
+      <span class="knob-label">Low</span>
+      <span class="cc-dot"></span>
+    </div>
+    <div class="knob-wrap" data-knob-index="2">
+      <div class="knob-dial"><img class="knob knob-sprite" src="knob0.png" alt="" /><svg class="knob knob-procedural" viewBox="0 0 40 40"><circle class="knob-body" cx="20" cy="20" r="17" /><line class="knob-indicator" x1="20" y1="20" x2="20" y2="6" /></svg></div>
+      <span class="knob-label">Mid</span>
+      <span class="cc-dot"></span>
+    </div>
+    <div class="knob-wrap" data-knob-index="3">
+      <div class="knob-dial"><img class="knob knob-sprite" src="knob0.png" alt="" /><svg class="knob knob-procedural" viewBox="0 0 40 40"><circle class="knob-body" cx="20" cy="20" r="17" /><line class="knob-indicator" x1="20" y1="20" x2="20" y2="6" /></svg></div>
+      <span class="knob-label">High</span>
+      <span class="cc-dot"></span>
+    </div>
+  </div>
+  <div id="screen">
+    <img src="screen.png" alt="" />
+    <div class="screen-glow"></div>
+    <div class="readout-overlay">
+      <span class="readout" id="screen-readout">--</span>
+      <span class="readout-label" id="screen-readout-label">no card</span>
+    </div>
+  </div>
+  <div id="banks-row">
+    <button id="stop-btn" title="Stop all currently playing pads">Stop</button>
+    <div id="banks"></div>
+    <button id="shift-btn">Shift</button>
+  </div>
+  <div id="midi-hint">MIDI: notes 36–47 (C1–B1) trigger pads 1–12 of the armed bank · Program Change 0–9 = bank A–J · click &amp; hold a pad below to preview it</div>
+  <div id="pads"></div>
+  <div id="status">Calling native listBanks()...</div>
+
+  <div id="confirm-modal" class="modal-overlay hidden">
+    <div class="modal-panel">
+      <p id="confirm-message"></p>
+      <div class="modal-actions">
+        <button type="button" id="confirm-cancel-btn">Cancel</button>
+        <button type="button" id="confirm-ok-btn" class="danger">Confirm</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="bank-target-modal" class="modal-overlay hidden">
+    <div class="modal-panel">
+      <p>Restore into which bank?</p>
+      <div id="bank-target-letters"></div>
+      <div class="modal-actions">
+        <button type="button" id="bank-target-cancel-btn">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="theme-modal" class="modal-overlay hidden">
+    <div class="modal-panel">
+      <p>Choose a theme</p>
+      <div id="theme-grid"></div>
+      <div class="modal-actions">
+        <button type="button" id="theme-close-btn">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="dsp-modal" class="modal-overlay hidden">
+    <div class="modal-panel dsp-panel">
+      <p id="dsp-modal-title">DSP</p>
+      <p id="dsp-status" class="dsp-status"></p>
+
+      <div class="dsp-row">
+        <button type="button" id="dsp-normalize-btn">Normalize</button>
+        <span class="dsp-feedback" id="dsp-normalize-result"></span>
+      </div>
+
+      <div class="dsp-row">
+        <button type="button" id="dsp-trim-btn">Trim Silence</button>
+        <span class="dsp-feedback" id="dsp-trim-result"></span>
+      </div>
+
+      <div class="dsp-row">
+        <button type="button" id="dsp-mono-btn">Mono</button>
+        <button type="button" id="dsp-stereo-btn">Stereo</button>
+      </div>
+
+      <div class="dsp-row dsp-row-fields">
+        <label>Fade in (s)<input type="number" id="dsp-fadein-input" min="0" step="0.01" value="0" /></label>
+        <label>Fade out (s)<input type="number" id="dsp-fadeout-input" min="0" step="0.01" value="0" /></label>
+        <button type="button" id="dsp-fade-btn">Apply</button>
+      </div>
+
+      <div class="dsp-row">
+        <button type="button" id="dsp-bpm-btn">Detect BPM</button>
+        <span id="dsp-bpm-result"></span>
+      </div>
+
+      <div class="dsp-row dsp-row-fields">
+        <label>Pitch (semitones)<input type="number" id="dsp-pitch-input" step="1" value="0" /></label>
+        <label>Time ratio<input type="number" id="dsp-stretch-input" min="0.1" step="0.05" value="1" /></label>
+        <button type="button" id="dsp-stretch-btn">Apply</button>
+      </div>
+
+      <p class="dsp-note">Each action writes immediately to the sample on the card/mirror — no undo.</p>
+
+      <div class="modal-actions">
+        <button type="button" id="dsp-close-btn">Close</button>
+      </div>
+    </div>
+  </div>
+
+    <script src="app.js"></script>
+</body>
+</html>

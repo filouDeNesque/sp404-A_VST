@@ -1,0 +1,728 @@
+    /* Dark chassis + orange accent, loosely evoking the SP-404SX's own panel: dark grey body,
+       orange labels/LEDs, chunky bank buttons, a 4x3 pad grid matching the hardware layout. */
+    :root {
+      --orange: #ff6a13;
+      --bg: #131214;
+      --panel: #232225;
+      --panel-raised: #2b2a2d;
+      --border: #38363a;
+      --text: #ece9e4;
+      --text-dim: #8f8c89;
+      /* Hand-marker/graffiti look for labels, like a sample pack's tape label scrawled by hand --
+         all macOS system fonts (no network fetch needed inside the WKWebView), ordered by how
+         close each gets to a "street" hand-marker feel before falling back to generic cursive. */
+      --font-street: "Marker Felt", "Chalkboard SE", "Bradley Hand", "Noteworthy", cursive;
+
+      /* --- Theming hooks (see themes.css) ---------------------------------------------------
+         Everything below defaults to exactly the look above ("Hardware" theme) -- themes.css
+         only ever overrides these on [data-theme="..."], never touches the rules that consume
+         them, so a theme is purely a set of variable values. */
+      --pad-bg-start: #333136;
+      --pad-bg-end: #201f22;
+      --pad-radius: 10px;
+      --pad-active-color: #4aa8ff;
+      --pad-active-glow: rgba(74, 168, 255, 0.55);
+      --ridge-base: #1a1a1c;
+      --bg-pattern: none;
+      /* Procedural knob (.knob-procedural, see below) -- unused by the Hardware theme itself
+         (which keeps the photographed sprite), but every other theme reads these. */
+      --knob-fill: #2b2a2d;
+      --knob-stroke: #4a484c;
+      --knob-indicator: var(--orange);
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: -apple-system, "Helvetica Neue", sans-serif;
+      background: var(--bg);
+      background-image: var(--bg-pattern);
+      color: var(--text);
+      padding: 4px 16px 16px;
+      border-top: 4px solid var(--orange);
+      position: relative;
+    }
+    /* Ribbed grip strips down the left/right edges, like the rubberized side grips on the real
+       SP-404A's case. Purely decorative, sits within the body's own side padding so it never
+       overlaps real content. */
+    body::before, body::after {
+      content: "";
+      position: fixed;
+      top: 0;
+      bottom: 0;
+      width: 11px;
+      background:
+        repeating-linear-gradient(
+          to bottom,
+          rgba(255, 255, 255, 0.05) 0px,
+          rgba(255, 255, 255, 0.05) 1px,
+          transparent 1px,
+          transparent 3px,
+          rgba(0, 0, 0, 0.4) 3px,
+          rgba(0, 0, 0, 0.4) 4px,
+          transparent 4px,
+          transparent 6px
+        ),
+        var(--ridge-base);
+      pointer-events: none;
+    }
+    body::before { left: 0; }
+    body::after { right: 0; }
+    /* While a native call is in flight: busy cursor everywhere, and bank buttons stop
+       accepting clicks so a second click can't race the first (see selectBank's token guard,
+       which also drops any response that arrives after a newer selection was made). */
+    body.loading { cursor: wait; }
+    body.loading #banks { pointer-events: none; opacity: 0.7; }
+    body.loading .bank { cursor: wait; }
+    h1 {
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: var(--orange);
+      margin: 0 0 14px;
+      padding-bottom: 8px;
+      border-bottom: 1px solid var(--border);
+    }
+    h2 {
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--text-dim);
+      margin: 18px 0 8px;
+    }
+    /* Flexbox + explicit calc() basis rather than CSS Grid: the WKWebView embedded in the
+       plugin editor was not reliably re-laying out a `display: grid` container after content
+       was injected asynchronously (post native-call innerHTML updates). Flex-wrap with a
+       manually computed basis (accounting for `gap` ourselves via calc()) plus a forced reflow
+       in JS after each innerHTML write has proven more reliable in this embedded WebView. */
+    /* 5 pair-buttons (A/F, B/G, C/H, D/I, E/J) + Shift, matching the SP-404A's physical bank
+       row exactly -- each hardware button covers 2 of the 10 banks, Shift picks which one. */
+    #banks-row { display: flex; gap: 5px; }
+    #banks { display: flex; gap: 5px; flex: 1; }
+    .bank, #shift-btn {
+      /* Raised-button look: light catching the top edge, shadow pooling at the bottom, like a
+         physical rubber/plastic button rather than a flat rectangle. */
+      background: linear-gradient(160deg, #302f33, #1c1b1e);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 4px 2px;
+      text-align: center;
+      cursor: pointer;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      min-height: 26px;
+      font-weight: 700;
+      font-size: 11px;
+      box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.06),
+        inset 0 -3px 5px rgba(0, 0, 0, 0.5),
+        0 1px 2px rgba(0, 0, 0, 0.4);
+      transition: transform 0.05s ease;
+    }
+    .bank { flex: 1 1 0; }
+    .bank:active, #shift-btn:active { transform: translateY(1px); }
+    .bank .letter { font-family: var(--font-street); font-size: 13px; color: var(--text-dim); }
+    .bank .letter.active { color: var(--text); }
+    .bank.selected {
+      background: linear-gradient(160deg, #ff8a3d, var(--orange));
+      border-color: var(--orange);
+      box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.3),
+        inset 0 -3px 5px rgba(0, 0, 0, 0.25),
+        0 0 0 2px rgba(255, 106, 19, 0.35);
+    }
+    .bank.selected .letter { color: rgba(26, 13, 0, 0.55); }
+    .bank.selected .letter.active { color: #1a0d00; }
+    #shift-btn {
+      flex: 0 0 44px;
+      color: var(--text-dim);
+      font-size: 9px;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+    #shift-btn.on {
+      background: linear-gradient(160deg, #ff8a3d, var(--orange));
+      border-color: var(--orange);
+      color: #1a0d00;
+      box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.3),
+        inset 0 -3px 5px rgba(0, 0, 0, 0.25),
+        0 0 0 2px rgba(255, 106, 19, 0.35);
+    }
+    #pads { display: flex; flex-wrap: wrap; gap: 6px; }
+    .pad {
+      /* 4 columns x 3 rows = 12 pads, matching the SP-404SX's physical pad layout. Square-ish
+         like the real hardware pads (aspect-ratio close to 1, not exact, so the label/detail/
+         controls text doesn't get uncomfortably cramped) -- overflow-y:auto is a safety net for
+         the rare long sample name/tempo line rather than letting it break the square shape. */
+      flex: 0 0 calc(25% - 4.5px);
+      aspect-ratio: 1 / 0.95;
+      overflow-y: auto;
+      background: linear-gradient(160deg, var(--pad-bg-start), var(--pad-bg-end));
+      border: 1px solid var(--border);
+      border-radius: var(--pad-radius);
+      padding: 6px 8px;
+      font-size: 10px;
+      line-height: 1.35;
+      position: relative;
+      cursor: pointer;
+      user-select: none;
+      transition: transform 0.05s ease;
+      box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.05),
+        inset 0 -4px 8px rgba(0, 0, 0, 0.55),
+        0 2px 3px rgba(0, 0, 0, 0.4);
+    }
+    .pad.pressed {
+      transform: translateY(1px);
+      background: linear-gradient(160deg, #3d3b41, #26242a);
+      box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.08),
+        inset 0 -2px 4px rgba(0, 0, 0, 0.5),
+        0 0 0 1px rgba(255, 106, 19, 0.4);
+    }
+    .pad::before {
+      content: "";
+      position: absolute;
+      top: 7px;
+      right: 7px;
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: #444;
+    }
+    .pad.has-sample::before { background: var(--orange); box-shadow: 0 0 4px var(--orange); }
+    /* Currently sounding (polled from PluginProcessor::getActivePadMask, see getActivePads) --
+       blue rather than orange so it reads as a distinct "now playing" state, separate from the
+       orange used for "selected/editing" elsewhere (banks, toggle buttons). */
+    .pad.active {
+      background: linear-gradient(160deg, #3a4b66, #1c242f);
+      border-color: var(--pad-active-color);
+      box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.08),
+        inset 0 -4px 8px rgba(0, 0, 0, 0.5),
+        0 0 0 2px var(--pad-active-color),
+        0 0 12px 2px var(--pad-active-glow);
+    }
+    /* Hovering a dragged .wav file over a pad, before it's dropped (see wirePadDragDrop) -- same
+       orange accent as .bank.selected/.toggle-btn.on, so it reads as "drop here to replace". */
+    .pad.drag-over {
+      border-color: var(--orange);
+      box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.08),
+        inset 0 -4px 8px rgba(0, 0, 0, 0.5),
+        0 0 0 2px var(--orange),
+        0 0 12px 2px rgba(255, 106, 19, 0.55);
+    }
+    .pad strong { font-family: var(--font-street); font-size: 14px; color: var(--orange); }
+    .pad .empty { opacity: 0.4; }
+    .pad .detail { color: var(--text-dim); font-variant-numeric: tabular-nums; }
+    .pad-controls {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 4px 8px;
+      margin-top: 4px;
+      cursor: default; /* editing controls shouldn't look draggable/pressable like the pad itself */
+    }
+    .toggle-row { display: flex; flex-wrap: nowrap; gap: 3px; flex-basis: 100%; }
+    .toggle-btn {
+      flex: 1 1 0;
+      background: linear-gradient(160deg, #2c2b2e, #1c1b1e);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      color: var(--text-dim);
+      font-size: 8px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.03em;
+      padding: 3px 0;
+      cursor: pointer;
+      box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.05),
+        inset 0 -2px 3px rgba(0, 0, 0, 0.5);
+    }
+    .toggle-btn.on {
+      background: linear-gradient(160deg, #ff8a3d, var(--orange));
+      border-color: var(--orange);
+      color: #1a0d00;
+      box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.3),
+        inset 0 -2px 3px rgba(0, 0, 0, 0.25);
+    }
+    /* lofi gets its own accent colour (green) so it reads as a different kind of toggle
+       (audio degradation) rather than a playback-behaviour switch like loop/gate/reverse. */
+    .toggle-btn[data-field="lofi"].on {
+      background: linear-gradient(160deg, #5fd88a, #2fae62);
+      border-color: #2fae62;
+      color: #062a10;
+    }
+    .pad-controls label {
+      display: inline-flex;
+      align-items: center;
+      gap: 3px;
+      font-size: 9px;
+      color: var(--text-dim);
+    }
+    .pad-controls input { accent-color: var(--orange); cursor: pointer; }
+    .pad-controls input[type="range"] { width: 52px; }
+    .pad-controls .vol-row { flex-basis: 100%; }
+    .pad-loading {
+      flex: 1 0 100%;
+      padding: 16px;
+      text-align: center;
+      color: var(--text-dim);
+      font-size: 11px;
+      animation: pulse 1.1s ease-in-out infinite;
+    }
+    @keyframes pulse {
+      0%, 100% { opacity: 0.35; }
+      50% { opacity: 1; }
+    }
+    /* SD icon overlays the top-right corner of the header row (same line as the header image),
+       green when a card is mounted, grey when absent -- polled via pollConnection(), see app.js. */
+    #sd-indicator {
+      position: absolute;
+      top: 2px;
+      right: 0;
+      width: 20px;
+      height: 20px;
+      color: var(--text-dim);
+      transition: color 0.2s ease;
+    }
+    #sd-indicator.connected { color: #34c759; }
+    #sd-indicator svg { width: 100%; height: 100%; fill: currentColor; }
+    /* Bank management menu -- mirrors #sd-indicator's position/size on the opposite corner. */
+    #menu-btn {
+      position: absolute;
+      top: 2px;
+      left: 0;
+      width: 20px;
+      height: 20px;
+      color: var(--text-dim);
+      cursor: pointer;
+      transition: color 0.15s ease;
+    }
+    #menu-btn:hover { color: var(--text); }
+    #menu-btn svg { width: 100%; height: 100%; fill: currentColor; }
+    #menu-dropdown {
+      display: none;
+      position: absolute;
+      top: 24px;
+      left: 0;
+      z-index: 20;
+      flex-direction: column;
+      gap: 3px;
+      background: linear-gradient(160deg, #2c2b2e, #1c1b1e);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 5px;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+      min-width: 150px;
+    }
+    #menu-dropdown.open { display: flex; }
+    #menu-dropdown button {
+      background: transparent;
+      border: none;
+      color: var(--text);
+      text-align: left;
+      font-size: 10px;
+      padding: 5px 6px;
+      border-radius: 4px;
+      cursor: pointer;
+    }
+    #menu-dropdown button:hover { background: rgba(255, 255, 255, 0.08); }
+    #menu-dropdown button.danger { color: #ff8a6a; }
+    #menu-dropdown button.danger:hover { background: rgba(255, 106, 19, 0.15); }
+    #menu-dropdown hr { border: none; border-top: 1px solid var(--border); margin: 3px 2px; }
+    /* Always-visible mode indicator, not directly clickable (the toggle lives in the menu) so a
+       stray click can't switch modes -- entering/leaving offline mode is deliberate, matching
+       how "Synchroniser" (also in the menu) is a deliberate, confirmed action. */
+    #mode-badge {
+      position: absolute;
+      top: 4px;
+      left: 24px;
+      font-size: 7px;
+      font-weight: 700;
+      letter-spacing: 0.06em;
+      color: var(--text-dim);
+      pointer-events: none;
+    }
+    #mode-badge.offline { color: var(--orange); }
+    #stop-btn {
+      background: linear-gradient(160deg, #3a2420, #2a1815);
+      color: #ffb38a;
+      border: 1px solid #5c2e22;
+      border-radius: 6px;
+      padding: 4px 10px;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      cursor: pointer;
+      box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.06),
+        inset 0 -2px 4px rgba(0, 0, 0, 0.5);
+    }
+    #stop-btn:active { transform: translateY(1px); }
+    /* Vol / Ctrl 1-3: real 0-127 parameters (not wired to DSP yet -- see README roadmap), but
+       draggable and MIDI-CC-learnable (right-click), so centered as their own row above the
+       screen like a real control panel. */
+    #knobs { display: flex; justify-content: center; gap: 22px; margin-bottom: 10px; }
+    .knob-wrap { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+    /* Ring of tick marks around each knob, like the graduated markings around a real hardware
+       dial -- purely decorative. Each tick is its own absolutely-positioned <div> (injected by
+       buildKnobTicks() in app.js) placed by rotate()+translateY(), not a masked conic-gradient:
+       a masked ::before is a *positioned* pseudo-element, and CSS paints positioned content
+       above static in-flow content regardless of DOM order -- so the previous ring either ended
+       up visually fighting the knob image or was too easy to misjudge/mismeasure against it.
+       Explicit ticks at a fixed radius outside the ~17px knob artwork are unambiguous. */
+    .knob-dial {
+      position: relative;
+      width: 54px;
+      height: 54px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .knob-tick {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      width: 2px;
+      height: 5px;
+      border-radius: 1px;
+      background: var(--text-dim);
+      transform: translate(-50%, -50%) rotate(var(--tick-angle)) translateY(-24px);
+      pointer-events: none;
+    }
+    /* Two representations share the .knob-dial slot: the original photographed sprite
+       (.knob-sprite, an <img>) and a procedural SVG knob (.knob-procedural) used by every theme
+       except Hardware (see themes.css) -- CSS just shows/hides whichever the active theme wants,
+       applyKnobVisual (app.js) keeps BOTH up to date on every change regardless, so switching
+       themes never needs a re-poll to look correct. Default (no theme, or [data-theme="hardware"])
+       shows the sprite -- matches the plugin's original look if JS hasn't applied a theme yet. */
+    .knob-procedural { display: none; }
+    [data-theme]:not([data-theme="hardware"]) .knob-sprite { display: none; }
+    [data-theme]:not([data-theme="hardware"]) .knob-procedural { display: block; }
+
+    /* Rotation is done by swapping which of the 7 knob{0..6}.png frames is loaded (see
+       applyKnobVisual/kKnobFrameTable in app.js), not by CSS-rotating a single image -- the
+       artwork has baked-in perspective/shading for specific orientations. The source sheet only
+       draws the 0%-50% half of the sweep, so the 50%-100% half reuses the same frames flipped
+       horizontally (.knob-mirrored) -- the icon set is left/right symmetric. */
+    .knob-sprite {
+      height: 34px;
+      width: auto;
+      display: block;
+      cursor: ns-resize;
+      filter: drop-shadow(0 2px 2px rgba(0, 0, 0, 0.5));
+      transition: filter 0.15s ease;
+      user-select: none;
+      -webkit-user-drag: none;
+    }
+    .knob-sprite.knob-mirrored { transform: scaleX(-1); }
+    /* Procedural knob: a plain circle + a line indicator that actually rotates via CSS transform
+       (unlike the sprite, no baked-in perspective to fake, so a real rotate() looks correct at
+       every angle) -- shape/colors come entirely from theme variables, .knob-angle is set by
+       applyKnobVisual the same way the sprite frame is chosen. */
+    .knob-procedural {
+      width: 34px;
+      height: 34px;
+      cursor: ns-resize;
+      user-select: none;
+      overflow: visible;
+    }
+    .knob-procedural .knob-body {
+      fill: var(--knob-fill);
+      stroke: var(--knob-stroke);
+      stroke-width: 2;
+    }
+    .knob-procedural .knob-indicator {
+      stroke: var(--knob-indicator);
+      stroke-width: 3;
+      stroke-linecap: round;
+      transform: rotate(var(--knob-angle, 0deg));
+      transform-origin: 20px 20px;
+      transition: transform 0.05s ease;
+    }
+    /* Briefly pulses orange while armed and waiting for the next MIDI CC (see startKnobLearn). */
+    .knob-wrap.learning .knob { filter: drop-shadow(0 0 6px rgba(255, 106, 19, 0.9)); animation: pulse 0.8s ease-in-out infinite; }
+    /* Small dot under a knob once it's mapped to a CC, so the mapping is visible at rest. */
+    .knob-wrap .cc-dot { width: 4px; height: 4px; border-radius: 50%; background: transparent; margin-top: -2px; }
+    .knob-wrap.mapped .cc-dot { background: var(--orange); }
+    .knob-label {
+      font-size: 8px;
+      color: var(--text-dim);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+    /* Round LCD status readout: a real photo of the SP-404A's own circular "Roland" screen,
+       with the armed bank letter overlaid on top of its blank LCD rectangle. */
+    #screen {
+      position: relative;
+      width: 130px;
+      height: 130px;
+      margin: 0 auto 14px;
+    }
+    #screen img { width: 100%; height: 100%; display: block; }
+    /* Inner glow ON the glass, not an outer halo around the disc: a radial tint layered above
+       the image (later in DOM => on top) and blended with it, clipped to the circle so it never
+       spills outside the screen. Off by default -- only shown while something is actually
+       audible (see pollActivePads/pollClipping -> updateScreenGlowState in app.js), not as a
+       permanent ambient glow. */
+    #screen .screen-glow {
+      position: absolute;
+      inset: 0;
+      border-radius: 50%;
+      pointer-events: none;
+      opacity: 0;
+      background: radial-gradient(circle, rgba(74, 168, 255, 0.6) 0%, rgba(74, 168, 255, 0.2) 55%, transparent 78%);
+      mix-blend-mode: screen;
+      transition: opacity 0.15s ease, background 0.15s ease;
+    }
+    #screen.sound-active .screen-glow { opacity: 1; }
+    #screen.clipping .screen-glow {
+      opacity: 1;
+      background: radial-gradient(circle, rgba(255, 59, 48, 0.7) 0%, rgba(255, 59, 48, 0.25) 55%, transparent 78%);
+    }
+    /* Positioned to match screen.png's blank LCD rectangle (measured on the source image:
+       roughly x 14%-86%, y 36.5%-64% of the circular crop). */
+    #screen .readout-overlay {
+      position: absolute;
+      left: 14%;
+      top: 36.5%;
+      width: 72%;
+      height: 27.5%;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 1px;
+      pointer-events: none;
+    }
+    #screen .readout {
+      font-family: "Courier New", monospace;
+      font-size: 22px;
+      font-weight: 700;
+      color: #4aa8ff;
+      text-shadow: 0 0 6px rgba(74, 168, 255, 0.75);
+      letter-spacing: 0.04em;
+      line-height: 1;
+      transition: color 0.15s ease, text-shadow 0.15s ease;
+    }
+    #screen.clipping .readout {
+      color: #ff3b30;
+      text-shadow: 0 0 6px rgba(255, 59, 48, 0.75);
+    }
+    #screen .readout-label {
+      font-size: 6px;
+      color: rgba(255, 255, 255, 0.5);
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+    }
+    #midi-hint { margin: 8px 0; font-size: 10px; color: var(--text-dim); }
+    #status { margin-top: 14px; font-size: 11px; color: var(--text-dim); }
+    #status.connected { color: var(--orange); }
+    .header-banner { position: relative; text-align: center; margin-bottom: 2px; }
+    .header-banner img {
+      width: 55%;
+      max-width: 260px;
+      height: auto;
+      display: inline-block;
+    }
+    /* Generic confirmation/picker modal (see showConfirm/pickBankTarget in app.js) -- used before
+       any action that destroys real files without an undo (clear/load-replace), styled like the
+       rest of the panel rather than a native dialog, so it stays visually consistent with the
+       hardware look. */
+    .modal-overlay {
+      position: fixed;
+      inset: 0;
+      z-index: 50;
+      background: rgba(0, 0, 0, 0.6);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .modal-overlay.hidden { display: none; }
+    .modal-panel {
+      background: linear-gradient(160deg, #2c2b2e, #1c1b1e);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 16px;
+      width: 240px;
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.6);
+    }
+    .modal-panel p {
+      margin: 0 0 12px;
+      font-size: 12px;
+      color: var(--text);
+      line-height: 1.4;
+    }
+    .modal-actions { display: flex; justify-content: flex-end; gap: 6px; }
+    .modal-actions button {
+      background: linear-gradient(160deg, #302f33, #1c1b1e);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      color: var(--text);
+      font-size: 10px;
+      font-weight: 700;
+      text-transform: uppercase;
+      padding: 5px 10px;
+      cursor: pointer;
+    }
+    .modal-actions button.danger {
+      background: linear-gradient(160deg, #3a2420, #2a1815);
+      color: #ffb38a;
+      border-color: #5c2e22;
+    }
+    #bank-target-letters {
+      display: grid;
+      grid-template-columns: repeat(5, 1fr);
+      gap: 5px;
+      margin-bottom: 12px;
+    }
+    #bank-target-letters button {
+      background: linear-gradient(160deg, #302f33, #1c1b1e);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      color: var(--text);
+      font-weight: 700;
+      font-size: 11px;
+      padding: 6px 0;
+      cursor: pointer;
+    }
+    #bank-target-letters button:hover { border-color: var(--orange); color: var(--orange); }
+
+    /* Compact "open the DSP panel for this pad" button, sits at the end of .pad-controls next to
+       the volume row -- reuses the same raised-button look as the modal-actions buttons rather
+       than adding a new visual style. */
+    .dsp-open-btn {
+      flex-basis: 100%;
+      margin-top: 2px;
+      background: linear-gradient(160deg, #302f33, #1c1b1e);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      color: var(--text-dim);
+      font-size: 8px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.03em;
+      padding: 3px 0;
+      cursor: pointer;
+    }
+    .dsp-open-btn:hover { color: var(--orange); border-color: var(--orange); }
+
+    /* Per-pad DSP panel (see openDspPanel/wireDspPanel in app.js) -- normalize/mono-stereo/fade/
+       trim/BPM/pitch/time-stretch, one modal reused across pads rather than N separate panels. */
+    .dsp-panel { width: 260px; }
+    .dsp-row {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      margin-bottom: 8px;
+      flex-wrap: wrap;
+    }
+    .dsp-row button {
+      background: linear-gradient(160deg, #302f33, #1c1b1e);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      color: var(--text);
+      font-size: 10px;
+      font-weight: 700;
+      text-transform: uppercase;
+      padding: 5px 8px;
+      cursor: pointer;
+    }
+    .dsp-row button:hover { border-color: var(--orange); color: var(--orange); }
+    .dsp-row button.active {
+      background: linear-gradient(160deg, #ff8a3d, var(--orange));
+      border-color: var(--orange);
+      color: #1a0d00;
+    }
+    .dsp-row button:disabled { opacity: 0.5; cursor: default; pointer-events: none; }
+    .dsp-status {
+      font-size: 9px !important;
+      color: var(--text-dim) !important;
+      text-transform: uppercase;
+      letter-spacing: 0.03em;
+      margin: -4px 0 8px !important;
+    }
+    .dsp-feedback { font-size: 9px; color: var(--text-dim); }
+    .dsp-feedback.good { color: #5fd88a; }
+    .dsp-row-fields { align-items: flex-end; }
+    .dsp-row-fields label {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      font-size: 8px;
+      color: var(--text-dim);
+      text-transform: uppercase;
+      letter-spacing: 0.03em;
+    }
+    .dsp-row-fields input {
+      width: 60px;
+      background: #1a1a1c;
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      color: var(--text);
+      font-size: 11px;
+      padding: 3px 4px;
+    }
+    #dsp-bpm-result { font-size: 11px; color: var(--orange); font-variant-numeric: tabular-nums; }
+    .dsp-note { font-size: 9px !important; color: var(--text-dim) !important; margin-top: 4px !important; }
+
+    /* Scattered decorative stickers (Kawaii/Japandi themes only, see renderStickerLayer in
+       app.js) -- fixed behind all real content (negative z-index survives regardless of DOM
+       order/other elements' own stacking), never intercepts clicks. Hidden entirely for every
+       other theme; app.js only populates it when the active theme actually uses it. */
+    #sticker-layer {
+      display: none;
+      position: fixed;
+      inset: 0;
+      z-index: -1;
+      pointer-events: none;
+      overflow: hidden;
+    }
+    [data-theme="kawaii"] #sticker-layer, [data-theme="japandi"] #sticker-layer { display: block; }
+    #sticker-layer img {
+      position: absolute;
+      opacity: 0.72;
+      filter: drop-shadow(0 2px 3px rgba(0, 0, 0, 0.25));
+    }
+
+    /* Theme picker grid (in #theme-modal) -- one swatch button per theme, color preview via an
+       inline custom property set from app.js rather than a hardcoded per-theme CSS rule (keeps
+       the theme list data-driven in app.js instead of duplicated here). */
+    #theme-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 6px;
+      margin-bottom: 12px;
+      max-height: 320px;
+      overflow-y: auto;
+    }
+    .theme-swatch {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      background: linear-gradient(160deg, #302f33, #1c1b1e);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 6px 8px;
+      cursor: pointer;
+      color: var(--text);
+      font-size: 10px;
+      text-align: left;
+    }
+    .theme-swatch:hover { border-color: var(--orange); }
+    .theme-swatch.active { border-color: var(--orange); box-shadow: 0 0 0 1px var(--orange); }
+    .theme-swatch .theme-swatch-dot {
+      width: 18px;
+      height: 18px;
+      border-radius: 50%;
+      flex: 0 0 auto;
+      background: var(--swatch-color, #888);
+      border: 1px solid rgba(255, 255, 255, 0.25);
+    }
