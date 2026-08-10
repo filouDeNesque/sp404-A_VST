@@ -56,6 +56,14 @@ void savePadInfo(const std::filesystem::path& sdRoot, char bankName, int indexIn
 std::filesystem::path samplePath(const std::filesystem::path& sdRoot, char bankName, int indexInBank,
                                   PadInfo::Format format);
 
+// 0-based pad sample index -- 0 for A1, +1 per pad within a bank, +Bank::padCount per bank letter
+// (up to 119 for J12). Matches the `SampleIndex` field of a WAV file's RLND chunk (see
+// sp404::RlndChunk/encodeWavWithRlndChunk in WavRlnd.h, docs/sp404sx-format.md) and
+// PatternEvent::sampleIndex0to119()'s addressing -- same formula, exposed here so
+// plugin/SampleImport.cpp doesn't need to duplicate it. Throws std::invalid_argument if
+// bankName/indexInBank are out of range.
+int padSampleIndex(char bankName, int indexInBank);
+
 // <sdRoot>/ROLAND/SP-404SX/PTN -- where every PTNxxxxx.BIN pattern file lives. See
 // docs/sp404sx-format.md's "PTN/PTNxxxxx.BIN" section.
 std::filesystem::path patternDir(const std::filesystem::path& sdRoot);

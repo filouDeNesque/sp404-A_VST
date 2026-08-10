@@ -392,12 +392,19 @@ void swapPadSample(PluginProcessor& processor, const juce::Array<juce::var>& arg
             const char bankChar = static_cast<char>(args[0].toString()[0]);
             const int indexInBank = static_cast<int>(args[1]);
 
-            juce::MemoryOutputStream decodedBase64;
-            if (juce::Base64::convertFromBase64(decodedBase64, args[2].toString())) {
-                auto sourceStream = std::make_unique<juce::MemoryInputStream>(
-                    decodedBase64.getData(), decodedBase64.getDataSize(), true);
-                ok = doSwapPadSample(processor, *cardRoot, bankChar, indexInBank,
-                                      importAudioToWav(std::move(sourceStream)));
+            // Validated up front (rather than left to doSwapPadSample's own check below) because
+            // padSampleIndex() throws on an out-of-range bank/pad, and bankChar/indexInBank are
+            // untrusted values straight from the WebView at this point.
+            if (bankChar >= 'A' && bankChar <= 'J' && indexInBank >= 1 && indexInBank <= Bank::padCount) {
+                juce::MemoryOutputStream decodedBase64;
+                if (juce::Base64::convertFromBase64(decodedBase64, args[2].toString())) {
+                    auto sourceStream = std::make_unique<juce::MemoryInputStream>(
+                        decodedBase64.getData(), decodedBase64.getDataSize(), true);
+                    ok = doSwapPadSample(
+                        processor, *cardRoot, bankChar, indexInBank,
+                        importAudioToWav(std::move(sourceStream),
+                                          static_cast<std::uint8_t>(padSampleIndex(bankChar, indexInBank))));
+                }
             }
         }
     }
@@ -423,8 +430,13 @@ void swapPadSampleFromPath(PluginProcessor& processor, const juce::Array<juce::v
             const int indexInBank = static_cast<int>(args[1]);
             const juce::File sourceFile(args[2].toString());
 
-            if (sourceFile.existsAsFile())
-                ok = doSwapPadSample(processor, *cardRoot, bankChar, indexInBank, importAudioToWav(sourceFile));
+            // See swapPadSample's matching comment: validated up front since padSampleIndex()
+            // throws on an out-of-range bank/pad, and these are untrusted WebView values.
+            if (sourceFile.existsAsFile() && bankChar >= 'A' && bankChar <= 'J' && indexInBank >= 1 &&
+                indexInBank <= Bank::padCount)
+                ok = doSwapPadSample(
+                    processor, *cardRoot, bankChar, indexInBank,
+                    importAudioToWav(sourceFile, static_cast<std::uint8_t>(padSampleIndex(bankChar, indexInBank))));
         }
     }
 

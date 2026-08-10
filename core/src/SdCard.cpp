@@ -137,6 +137,11 @@ std::filesystem::path samplePath(const std::filesystem::path& sdRoot, char bankN
     return smplDir(sdRoot) / (sampleStem(bankName, indexInBank) + ext);
 }
 
+int padSampleIndex(char bankName, int indexInBank) {
+    checkPadRange(bankName, indexInBank, "padSampleIndex");
+    return (bankName - 'A') * Bank::padCount + (indexInBank - 1);
+}
+
 std::filesystem::path patternDir(const std::filesystem::path& sdRoot) {
     return sdRoot / "ROLAND" / "SP-404SX" / "PTN";
 }

@@ -56,7 +56,7 @@ std::optional<juce::AudioBuffer<float>> loadPadBuffer(const std::filesystem::pat
 
 bool writePadBuffer(const std::filesystem::path& sdRoot, char bank, int indexInBank,
                      const juce::AudioBuffer<float>& buffer) {
-    const auto wavBytes = encodeToWav(buffer);
+    const auto wavBytes = encodeToWav(buffer, static_cast<std::uint8_t>(padSampleIndex(bank, indexInBank)));
     if (!wavBytes)
         return false;
     try {

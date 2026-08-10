@@ -42,7 +42,7 @@ ctest --test-dir build
 
 Les tests couvrent `core/` (parsing `PAD_INFO.BIN` et chunk `RLND`), voir
 [`docs/sp404sx-format.md`](docs/sp404sx-format.md) pour la spec du format et ses sources
-(partiellement vérifiée contre une vraie carte SD SP-404SX).
+(vérifiée contre une vraie carte SD SP-404SX).
 
 ## Vérifier le plugin manuellement
 
@@ -128,10 +128,11 @@ Les tests couvrent `core/` (parsing `PAD_INFO.BIN` et chunk `RLND`), voir
       dans ce contexte, donc ce cas précis n'est pas récupérable depuis l'UI web. Contournement
       fiable : glisser d'abord depuis Splice vers le Finder/bureau, puis glisser ce fichier depuis
       le Finder sur le pad (chemin testé et fonctionnel).
-    Limitations : seuls wav/aif/aiff/flac/mp3/mp4/m4a sont acceptés (rejeté côté UI sinon) ; pas
-    de chunk `RLND` dans le fichier écrit, donc la compatibilité avec le vrai hardware après un
-    swap logiciel n'est pas garantie (notre propre lecture n'en a pas besoin, voir
-    `docs/sp404sx-format.md`).
+    Limitations : seuls wav/aif/aiff/flac/mp3/mp4/m4a sont acceptés (rejeté côté UI sinon).
+    Le fichier écrit inclut désormais le chunk `RLND` requis par le vrai hardware (voir la
+    section Roadmap "Chunk WAV `RLND`" plus bas pour le détail) — un swap logiciel ne devrait
+    plus être ignoré/rejeté par un SP-404SX/A réel, sous réserve du test bout-en-bout sur le vrai
+    appareil documenté comme non fait ci-dessous.
 11. Menu de gestion des banks (icône en haut à gauche, miroir de l'icône carte SD) :
     Sauvegarder/Charger toutes les banks (zippe/restaure `SMPL/` en entier, voir
     `sp404::saveAllBanksToZip`/`loadAllBanksFromZip`, `plugin/BankArchive.h`), Sauvegarder cette
@@ -321,11 +322,49 @@ docs/     spécification du format de carte SD SP-404SX et ses sources.
 ## Roadmap (hors scope de cette mise en place)
 
 
-- Validation du chunk WAV `RLND` contre le code source complet de `uttori-audio-wave` et/ou un
-  vrai fichier `.WAV` de carte SD (la table `PAD_INFO.BIN`, elle, a déjà été vérifiée contre du
-  matériel réel — voir `docs/sp404sx-format.md`).
 - Détection de carte SD sur Windows/Linux si le projet s'étend au-delà de macOS (pour l'instant
   `findConnectedCardRoot()` ne scanne que `/Volumes`).
+- ✅ **Chunk WAV `RLND`** (2026-08-10) : vérifié byte-for-byte contre une vraie carte SD SP-404SX
+  (device, les 4 octets "unknown", `SampleIndex` — voir `docs/sp404sx-format.md`) puis branché
+  dans le pipeline d'écriture (`sp404::encodeWavWithRlndChunk`, `core/include/sp404/WavRlnd.h`/
+  `.cpp`, appelé depuis `plugin/SampleImport.cpp::encodeToWav`). **Cause racine identifiée et
+  corrigée** d'un vrai problème utilisateur signalé pendant cette session (un sample importé via
+  ce plugin apparaissait bien sur la carte SD mais le SP-404SX refusait de le charger sur un pad,
+  avec une erreur à l'écran) : `encodeToWav` utilisait jusqu'ici `juce::WavAudioFormat`, un writer
+  WAV générique qui n'écrit pas ce chunk custom Roland (et insère à la place son propre chunk
+  `JUNK` d'alignement) — confirmé en trouvant, sur la carte réelle utilisée pour cette
+  vérification, deux fichiers portant exactement cette signature (`A0000002.WAV`/`A0000006.WAV`),
+  qui se sont avérés être des samples que ce plugin avait lui-même écrits lors de tests
+  précédents dans cette session, sans le chunk requis. `encodeToWav` réutilise toujours le writer
+  JUCE pour la conversion audio (float→16-bit PCM, déjà fiable) mais en extrait ensuite les
+  octets PCM bruts (via `sp404::readWavInfo`, qui parcourt les chunks génériquement — peu importe
+  la forme exacte du conteneur que JUCE a produit) pour les ré-empaqueter dans un fichier qui
+  reproduit exactement la disposition d'un vrai fichier de la carte : chunk `fmt ` de 18 octets
+  (16 champs PCM standards + extension `cbSize` à 0, comme sur la carte réelle plutôt que les 16
+  octets minimaux de JUCE), puis le chunk `RLND` paddé pour que les données audio démarrent
+  exactement à l'offset 512 (vérifié constant quel que soit le nombre de canaux/taux
+  d'échantillonnage). En bonus, corrige aussi un second écart avec le matériel réel repéré au
+  passage : `origSampleStart`/`origSampleEnd` dans `PAD_INFO.BIN` (calculés par
+  `replacePadSample` à partir de l'offset du chunk `data`) valent maintenant 512 comme sur une
+  vraie carte, au lieu d'un offset dépendant de la forme du conteneur JUCE.
+  `sp404::padSampleIndex(bankChar, indexInBank)` (nouveau, `core/include/sp404/SdCard.h`)
+  centralise le calcul de l'index 0-119 attendu par `SampleIndex`, utilisé par
+  `plugin/SampleImport.cpp` et `plugin/SampleDsp.cpp`.
+  **Vérification** : `encodeWavWithRlndChunk` comparé byte-for-byte à un vrai fichier `A0000001.WAV`
+  de la carte réelle (fixture embarquée dans `core/tests/WavRlndTests.cpp`, comme les fixtures
+  `PTN` déjà utilisées ailleurs) — **8 nouveaux tests** (byte-for-byte contre la fixture réelle,
+  position de `data` à l'offset 512, padding d'un `pcmData` de longueur impaire, champ de taille
+  RIFF patché correctement, retour vide pour des paramètres invalides) plus 2 pour
+  `padSampleIndex`. Un harnais offline jetable (retiré après usage, comme d'habitude dans cette
+  session) a en plus vérifié le pipeline `plugin/` complet bout-en-bout : `encodeToWav()` sur un
+  signal de test → structure de fichier correcte (RLND/device/SampleIndex/`data` aux bons
+  offsets) → relu avec succès par le lecteur WAV natif de JUCE lui-même (confirme qu'ajouter ce
+  chunk custom ne casse pas la compatibilité WAV standard) → contenu audio identique à l'original
+  à la quantification 16-bit près. 66/66 `ctest`, build propre, 3/3 `auval`. **Non fait** : un
+  test bout-en-bout sur le **vrai matériel** (importer un sample via le plugin puis confirmer sur
+  l'appareil lui-même qu'il est accepté sur un pad) reste à faire par l'utilisateur — hors de
+  portée de cet environnement, qui n'a aucun moyen d'actionner l'écran/les boutons physiques du
+  SP-404SX/A.
 - ✅ Persistance d'état dans la session DAW (`PluginProcessor::getStateInformation`/
   `setStateInformation`, XML via `AudioProcessor::copyXmlToBinary`/`getXmlFromBinary` — la
   convention JUCE standard pour ça, plutôt que le JSON déjà utilisé ailleurs dans ce projet pour

@@ -1,10 +1,12 @@
 # Format de la carte SD Roland SP-404SX
 
-Statut : **partiellement vérifié contre une vraie carte SD SP-404SX** (2026-08-08, PTN ajouté
-2026-08-09). L'emplacement du fichier d'index a été corrigé suite à cette vérification (voir plus
-bas) ; la table d'octets de `PAD_INFO.BIN` a été confirmée valeur par valeur sur un vrai
-enregistrement de pad, et le format `PTN/PTNxxxxx.BIN` (patterns) a été vérifié contre 3 vrais
-fichiers de la carte. Le chunk WAV `RLND` reste non vérifié (voir "Points à vérifier").
+Statut : **vérifié contre une vraie carte SD SP-404SX** (2026-08-08, PTN ajouté 2026-08-09, chunk
+`RLND` vérifié et branché 2026-08-10). L'emplacement du fichier d'index a été corrigé suite à
+cette vérification (voir plus bas) ; la table d'octets de `PAD_INFO.BIN` a été confirmée valeur
+par valeur sur un vrai enregistrement de pad, le format `PTN/PTNxxxxx.BIN` (patterns) a été
+vérifié contre 3 vrais fichiers de la carte, et le chunk WAV `RLND` a été vérifié byte-for-byte
+contre le header d'un vrai fichier `.WAV` de la carte (voir plus bas) — c'était le seul point
+encore marqué "non vérifié" dans cette page.
 
 ## Sources
 
@@ -66,17 +68,51 @@ valeurs multi-octets sont en **big-endian**.
 
 ## Chunk WAV `RLND`
 
+**Vérifié byte-for-byte (2026-08-10)** contre `SMPL/A0000001.WAV` (pad A1) et les octets 0x20-0x3F
+de `A0000012.WAV`/`B0000001.WAV`/`J0000012.WAV` (pads A12/B1/J12) d'une vraie carte SD SP-404SX.
 Chunk custom Roland ajouté aux fichiers `.WAV` exportés vers la carte, en plus des chunks
-standards (`fmt `, `data`, ...).
+standards (`fmt `, `data`, ...) — sans lui, le SP-404SX/A refuse de reconnaître le fichier comme
+un sample de pad valide (voir "Pourquoi ce chunk compte" plus bas).
 
-- `ChunkID` : `"RLND"` (4 octets ASCII).
-- `ChunkSize` : 4 octets.
-- `Device` : identifiant de l'appareil, ex. `"roifspsx"` pour le SP-404SX (8 octets ASCII).
-- Octets non identifiés (rôle exact à confirmer contre le code source `uttori-audio-wave`).
-- `SampleIndex` : index de pad — 0 pour A1, incrémenté de 1 par pad, +12 par banque (donc J12
-  = 119).
-- Le chunk est paddé avec des zéros de façon à ce que les données audio (`data` chunk)
-  démarrent exactement à l'offset 512 dans le fichier.
+- `ChunkID` : `"RLND"` (4 octets ASCII), à l'offset 38 du fichier (12 octets d'en-tête RIFF/WAVE +
+  26 octets de chunk `fmt `, voir plus bas) sur tous les fichiers réels vérifiés.
+- `ChunkSize` : 4 octets little-endian, **toujours `458`** dans les fichiers vérifiés — parce que
+  la taille du chunk `fmt ` qui précède est toujours fixe (voir plus bas) et que ce chunk est
+  paddé pour que les données audio démarrent exactement à l'offset 512, indépendamment du nombre
+  de canaux/taux d'échantillonnage (qui ne changent que des *valeurs* de champs dans des chunks
+  de taille fixe, jamais leur taille).
+- `Device` : identifiant de l'appareil, `"roifspsx"` pour le SP-404SX (8 octets ASCII) —
+  **confirmé**, identique sur tous les fichiers vérifiés.
+- 4 octets "unknown" : **confirmés `04 00 00 00`** sur tous les fichiers vérifiés (constant,
+  aucune variation observée selon banque/pad/canaux/durée).
+- `SampleIndex` (1 octet) : index de pad — 0 pour A1, incrémenté de 1 par pad, +12 par banque
+  (donc J12 = 119). **Confirmé** : `A0000001.WAV`→0, `A0000012.WAV`→11 (0x0b),
+  `B0000001.WAV`→12 (0x0c), `J0000012.WAV`→119 (0x77) — correspond exactement à la formule
+  `(banque-'A')*12 + (padDansLaBanque-1)` (voir `sp404::padSampleIndex`,
+  `core/include/sp404/SdCard.h`).
+- Le chunk est paddé avec des zéros (après `Device`+unknown+`SampleIndex`, soit 13 octets de
+  données utiles sur les 458 du chunk) de façon à ce que les données audio (`data` chunk)
+  démarrent exactement à l'offset 512 dans le fichier — **confirmé**.
+
+### Le chunk `fmt ` qui précède
+
+Également vérifié à cette occasion : le chunk `fmt ` d'un fichier réel fait **18 octets** de
+données (`ChunkSize=18`, pas les 16 octets d'un PCM minimal) — les 16 champs PCM standards plus
+une extension `cbSize` de 2 octets à `0`. C'est ce qui rend l'offset du chunk `RLND` (38) et sa
+taille (458) constants pour toute combinaison canaux/taux d'échantillonnage : `12 (RIFF/WAVE) + 8
+(en-tête fmt) + 18 (données fmt) = 38`, puis `512 - 38 - 8 (en-tête RLND) - 8 (en-tête data) =
+458`.
+
+### Pourquoi ce chunk compte
+
+Le plugin écrivait jusqu'ici les fichiers `.WAV` avec `juce::WavAudioFormat`, un writer WAV
+générique qui ne connaît pas ce chunk Roland (et insère à la place son propre chunk `JUNK`
+d'alignement, chunk `fmt ` de 16 octets standard) — **confirmé en trouvant deux fichiers sur la
+carte réelle utilisée pour cette vérification qui portaient exactement cette signature (pas de
+`RLND`, chunk `JUNK` à la place)** : `A0000002.WAV` et `A0000006.WAV`, tous deux des samples que
+ce plugin avait lui-même écrits lors de tests précédents dans cette session. Voir
+`sp404::encodeWavWithRlndChunk` (`core/include/sp404/WavRlnd.h`/`.cpp`) et
+`plugin/SampleImport.cpp`, où c'est maintenant branché.
 
 ## Vérification effectuée (2026-08-08)
 
@@ -201,8 +237,11 @@ présents sur la carte (banques C, D et I respectivement, qui contiennent bien d
 
 ## Points restant à vérifier
 
-1. Chunk WAV `RLND` : toujours non vérifié contre un vrai fichier `.WAV` de la carte (les
-   octets "unknown" restent des placeholders). À faire : lire le code source complet de
-   `uttori-audio-wave` et/ou dumper les premiers octets d'un `.WAV` réel de `SMPL/`.
+1. ✅ Chunk WAV `RLND` : vérifié (2026-08-10), voir la section dédiée plus haut.
 2. Voir la section "Ce qui reste ouvert" ci-dessus pour les inconnues restantes sur le format
    `PTN`.
+3. Un test bout-en-bout **sur le vrai matériel** (importer un sample via le plugin, puis vérifier
+   sur le SP-404SX/A lui-même qu'il est bien reconnu sur le pad, pas seulement que les octets du
+   fichier correspondent à ceux d'un fichier déjà accepté par l'appareil) reste à faire par
+   l'utilisateur — hors de portée de cet environnement (pas de façon d'actionner l'écran/les
+   boutons physiques de l'appareil depuis ici).
