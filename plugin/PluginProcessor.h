@@ -203,6 +203,13 @@ private:
         bool active = false;
         int stopFadeRemaining = 0;
         int triggerOrder = 0; // for oldest-first voice stealing, see handleMidiMessage
+        // Extra linear gain multiplier applied on top of the pad's own configured volume, from a
+        // pattern event's recorded velocity (see triggerVoice()) -- always 1.0 (no effect) for
+        // live/preview voices in `voices`, which intentionally don't model velocity at all (see
+        // handleMidiMessage's note-on branch and the README Limitations section: every pad always
+        // plays at its own configured volume for live MIDI, regardless of what velocity a
+        // controller sends).
+        float velocityGain = 1.0f;
     };
 
     void handleMidiMessage(const juce::MidiMessage& message);
@@ -222,9 +229,12 @@ private:
     // once rather than colliding with (or being limited to) live playback's single-armed-bank
     // pool. Deliberately not used by handleMidiMessage's existing note-on path -- that path's
     // direct `voices[padIndex]` indexing is untouched, to avoid any risk of changing already-
-    // working live-triggering behaviour while adding this.
+    // working live-triggering behaviour while adding this. `velocity` (0-127, straight from the
+    // pattern event -- see PatternTriggerEvent) sets the resulting voice's velocityGain; unlike
+    // live MIDI, pattern playback *does* model velocity, since it's already recorded data rather
+    // than something a live controller would need to send accurately in the moment.
     void triggerVoice(std::span<Voice> voiceSet, int maxPolyphony, std::shared_ptr<const LoadedBank> bank,
-                       int padIndex);
+                       int padIndex, std::uint8_t velocity);
     // Recomputes the low/mid/high filter coefficients from the current knob values. Called once
     // per processBlock (block-rate, not sample-rate -- coefficient calculation is cheap and this
     // keeps the EQ responsive to knob/MIDI-CC moves without needing a smoothed-parameter

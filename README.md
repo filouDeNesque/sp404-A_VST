@@ -312,6 +312,11 @@ docs/     spécification du format de carte SD SP-404SX et ses sources.
 - Polyphonie limitée à 2 pads distincts simultanés (`kMaxPolyphony`) ; un 3ᵉ pad coupe le plus
   ancien.
 - Pas de détection de tonalité/clé musicale (voir panneau DSP) — seul le BPM est estimé.
+- Vélocité MIDI live ignorée : chaque pad joue toujours à son volume configuré (`PAD_INFO.BIN`),
+  quelle que soit la vélocité envoyée par un contrôleur/clavier externe. La lecture de pattern,
+  elle, modélise la vélocité enregistrée dans le pattern (voir la section Roadmap "Triggering de
+  pattern") — une différence assumée : la vélocité d'un pattern est une donnée déjà enregistrée,
+  pas quelque chose qu'un contrôleur doit envoyer correctement en temps réel.
 
 ## Roadmap (hors scope de cette mise en place)
 
@@ -474,9 +479,9 @@ fait" plus bas).
   un pad sans `gate` continue jusqu'à sa fin naturelle. Comme `advance()` peut désormais
   produire des événements pas strictement triés par tick (une note très courte peut voir sa
   note-off dépasser une note-on suivante dans l'ordre du vecteur), `processBlock` trie
-  `patternTriggerScratch` par position d'échantillon avant la fusion avec le buffer MIDI.
-  Vélocité toujours pas modélisée (comme le MIDI live, qui l'ignore déjà — chaque hit joue au
-  volume configuré du pad).
+  `patternTriggerScratch` par position d'échantillon avant la fusion avec le buffer MIDI. À ce
+  stade, la vélocité n'était pas encore modélisée (comme le MIDI live, qui l'ignore — voir le
+  bullet dédié plus bas pour ce qui a changé depuis côté patterns).
 - **Corrections annexes découvertes en implémentant ceci** : "Stop All" (bouton Cancel/Stop
   général) ne coupait pas les voix de pattern ni le scheduler lui-même — corrigé, un Stop All
   arrête maintenant tout sans exception. "Stop" sur un pattern spécifique coupe désormais aussi,
@@ -506,18 +511,38 @@ fait" plus bas).
   `PatternPlayerTests.cpp` : position déjà exactement sur une limite de mesure (retour immédiat,
   pas d'attente d'une mesure entière inutile), arrondi vers le haut en plein mesure (4/4),
   signatures non-4/4, repli sur 4/4 pour une signature invalide.
-- **Vérification** : 59/59 `ctest` (19 tests liés à `PatternPlayer` au total : 15 précédents +
-  4 nouveaux pour `nextBarBoundaryPpq`), build complet propre, 3/3 `auval`. **Même limite
-  qu'avant** : la lecture audio bout-en-bout dans un vrai DAW — y compris le comportement de
-  quantification lui-même en conditions réelles (déclencher un pattern en plein mesure et
-  entendre qu'il attend bien la limite suivante) — n'a toujours pas pu être vérifiée dans cet
-  environnement (pas d'hôte disponible) — à tester manuellement.
+- ✅ **Vélocité des événements de pattern** (ajouté après le tour de quantification) :
+  `Voice` (`PluginProcessor.h`) gagne un `velocityGain` (gain linéaire, 1.0 par défaut) appliqué
+  en plus du volume configuré du pad (`renderVoices` : `gain = pad.info.volume/127 *
+  voice.velocityGain`). `triggerVoice()` (le chemin *uniquement* utilisé par la lecture de
+  pattern, jamais par le MIDI live, voir plus haut) prend désormais un paramètre `velocity`
+  (0-127, directement `PatternTriggerEvent::velocity`, lui-même recopié de l'octet vélocité de
+  l'événement `PTN` d'origine — déjà décodé sans être utilisé jusqu'ici) et fixe
+  `velocityGain = velocity/127`. **Volontairement scindé du MIDI live** : `handleMidiMessage`
+  continue de fixer `voice.velocityGain = 1.0f` explicitement sur son propre chemin
+  (`voices`, jamais `triggerVoice()`) — changer aussi le comportement du MIDI live n'était pas
+  demandé et casserait un comportement déjà établi (chaque pad joue à son volume configuré, quel
+  que soit ce qu'envoie un contrôleur), voir Limitations. Sur les 3 patterns réels déjà utilisés
+  pour vérifier le format (voir plus haut), l'octet vélocité vaut `127` sur tous les événements
+  réels (`0` seulement sur les placeholders, qui ne déclenchent rien) — donc ce changement ne
+  modifie le volume perçu d'aucun pattern déjà testé contre du matériel réel, mais prend
+  maintenant en compte une vélocité différente si un pattern en contient une (import MIDI avec
+  vélocité variable, ou futur pattern réel enregistré avec une frappe plus légère sur certains
+  hits).
+- **Vérification** : modification côté `plugin/` uniquement (pas de nouveau code dans `core/`,
+  donc pas de nouveau test `ctest` — `PluginProcessor` ne peut pas être testé hors du plugin
+  réel, voir la note sur `JucePlugin_Name` plus haut dans ce fichier) : 59/59 `ctest` (inchangé),
+  build complet propre, 3/3 `auval`. Relecture attentive du code (le calcul est un simple produit
+  de deux gains linéaires, même famille de risque que le gain de volume déjà en place) plutôt
+  qu'un test dédié. **Même limite qu'avant** : ni ce changement ni le reste de la lecture de
+  pattern n'ont pu être vérifiés à l'oreille dans un vrai DAW dans cet environnement (pas d'hôte
+  disponible) — à tester manuellement.
 
 **Non fait** : alignement *continu* sur la *position* du transport hôte pendant toute la durée
 de la lecture (un pattern déjà lancé ne se recale jamais sur la timeline hôte si celle-ci saute/
 boucle/est déplacée manuellement en cours de route — seul le *démarrage* est quantifié sur la
 prochaine mesure, voir ci-dessus ; gérer un saut/bouclage arbitraire de l'hôte en cours de
 lecture nécessiterait de repenser le modèle de suivi des note-off en attente, qui suppose une
-progression monotone) ; vélocité des événements de pattern ; jouer plusieurs patterns
-simultanément (un seul `PatternPlayer` par instance de plugin actuellement).
+progression monotone) ; jouer plusieurs patterns simultanément (un seul `PatternPlayer` par
+instance de plugin actuellement).
 

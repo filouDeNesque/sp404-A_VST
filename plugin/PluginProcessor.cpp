@@ -115,7 +115,7 @@ void PluginProcessor::stopVoice(Voice& voice) {
 }
 
 void PluginProcessor::triggerVoice(std::span<Voice> voiceSet, int maxPolyphony, std::shared_ptr<const LoadedBank> bank,
-                                    int padIndex) {
+                                    int padIndex, std::uint8_t velocity) {
     if (bank == nullptr || padIndex < 0 || padIndex >= kPadsPerBank)
         return;
 
@@ -179,6 +179,7 @@ void PluginProcessor::triggerVoice(std::span<Voice> voiceSet, int maxPolyphony, 
     target->position = pad.info.reverse ? static_cast<double>(rangeEnd - 1) : static_cast<double>(rangeStart);
     target->stopFadeRemaining = 0;
     target->triggerOrder = nextTriggerOrder++;
+    target->velocityGain = static_cast<float>(velocity) / 127.0f;
     target->active = rangeEnd > rangeStart;
 }
 
@@ -274,6 +275,10 @@ void PluginProcessor::handleMidiMessage(const juce::MidiMessage& message) {
         voice.position = pad.info.reverse ? static_cast<double>(rangeEnd - 1) : static_cast<double>(rangeStart);
         voice.stopFadeRemaining = 0;
         voice.triggerOrder = nextTriggerOrder++;
+        // Deliberately not derived from message.getVelocity() -- live MIDI doesn't model velocity
+        // at all (see the Voice::velocityGain doc comment and README Limitations); every pad
+        // always plays at its own configured volume regardless of what a controller sends.
+        voice.velocityGain = 1.0f;
         voice.active = rangeEnd > rangeStart;
     } else if (message.isNoteOff()) {
         const int padIndex = message.getNoteNumber() - kBasePadNote;
@@ -331,7 +336,7 @@ void PluginProcessor::renderVoices(juce::AudioBuffer<float>& buffer, int startSa
             continue;
         }
 
-        const float gain = static_cast<float>(pad.info.volume) / 127.0f;
+        const float gain = static_cast<float>(pad.info.volume) / 127.0f * voice.velocityGain;
         const int srcChannels = pad.buffer.getNumChannels();
         const int direction = pad.info.reverse ? -1 : 1;
 
@@ -515,7 +520,7 @@ void PluginProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiB
                 const auto bankIdx = static_cast<size_t>(event.bank - 'A');
                 if (bankIdx < activePatternBanks.size() && activePatternBanks[bankIdx] != nullptr)
                     triggerVoice(patternVoices, kMaxPatternPolyphony, activePatternBanks[bankIdx],
-                                 event.padIndexInBank - 1);
+                                 event.padIndexInBank - 1, event.velocity);
             } else {
                 // Same "only cut a *gated* pad early" rule as handleMidiMessage's live-MIDI
                 // note-off below -- an ungated pad just keeps playing to its natural end/loop.
