@@ -1,6 +1,7 @@
 #include "PluginProcessor.h"
 
 #include <algorithm>
+#include <limits>
 #include <system_error>
 
 #include "PluginEditor.h"
@@ -36,6 +37,7 @@ PluginProcessor::PluginProcessor()
     : AudioProcessor(BusesProperties().withOutput("Output", juce::AudioChannelSet::stereo(), true)),
       bankLoader([this] { return resolveCardRoot(); }) {
     bankLoader.requestBank('A');
+    patternTriggerScratch.reserve(32); // avoids a mid-playback allocation for all but pathologically dense patterns
 
     static const char* const knobNames[kNumKnobs] = {"Volume", "Low", "Mid", "High"};
     for (int i = 0; i < kNumKnobs; ++i) {
@@ -110,6 +112,115 @@ bool PluginProcessor::isBusesLayoutSupported(const BusesLayout& layouts) const {
 void PluginProcessor::stopVoice(Voice& voice) {
     if (voice.active && voice.stopFadeRemaining == 0)
         voice.stopFadeRemaining = kStopFadeSamples;
+}
+
+void PluginProcessor::triggerVoice(std::span<Voice> voiceSet, int maxPolyphony, std::shared_ptr<const LoadedBank> bank,
+                                    int padIndex) {
+    if (bank == nullptr || padIndex < 0 || padIndex >= kPadsPerBank)
+        return;
+
+    const auto& pad = bank->pads[static_cast<size_t>(padIndex)];
+    if (!pad.hasSample)
+        return;
+
+    int rangeStart = static_cast<int>(pad.info.userSampleStart);
+    int rangeEnd = static_cast<int>(pad.info.userSampleEnd);
+    const int numSamples = pad.buffer.getNumSamples();
+    if (rangeEnd <= rangeStart || rangeEnd > numSamples) {
+        rangeStart = 0;
+        rangeEnd = numSamples;
+    }
+
+    // Reuse an already-active voice for this exact (bank, pad) if one exists in this set --
+    // retriggering doesn't count against maxPolyphony, it just restarts below. Otherwise steal
+    // the oldest active voice in the set if already at maxPolyphony, then use any free slot.
+    Voice* target = nullptr;
+    for (auto& v : voiceSet) {
+        if (v.active && v.padIndex == padIndex && v.bank.get() == bank.get()) {
+            target = &v;
+            break;
+        }
+    }
+
+    if (target == nullptr) {
+        int activeCount = 0;
+        for (auto& v : voiceSet)
+            if (v.active)
+                ++activeCount;
+
+        if (activeCount >= maxPolyphony) {
+            Voice* oldest = nullptr;
+            for (auto& v : voiceSet) {
+                if (v.active && (oldest == nullptr || v.triggerOrder < oldest->triggerOrder))
+                    oldest = &v;
+            }
+            if (oldest != nullptr)
+                stopVoice(*oldest);
+        }
+
+        for (auto& v : voiceSet) {
+            if (!v.active) {
+                target = &v;
+                break;
+            }
+        }
+        // Every slot still active (mid-fade-out from the steal above) -- reuse the one just
+        // stolen rather than dropping the trigger; cosmetic edge case, not expected in practice
+        // since maxPolyphony-sized sets always have at least one slot free the instant a steal
+        // happens above.
+        if (target == nullptr)
+            target = &voiceSet.front();
+    }
+
+    target->bank = std::move(bank);
+    target->padIndex = padIndex;
+    target->rangeStart = rangeStart;
+    target->rangeEnd = rangeEnd;
+    target->position = pad.info.reverse ? static_cast<double>(rangeEnd - 1) : static_cast<double>(rangeStart);
+    target->stopFadeRemaining = 0;
+    target->triggerOrder = nextTriggerOrder++;
+    target->active = rangeEnd > rangeStart;
+}
+
+bool PluginProcessor::triggerPattern(char bank, int indexInBank) {
+    const auto cardRoot = resolveCardRoot();
+    if (!cardRoot)
+        return false;
+
+    const auto pattern = readPattern(patternSlotPath(*cardRoot, bank, indexInBank));
+    if (!pattern)
+        return false;
+
+    // Loads every bank this pattern's events actually reference -- usually just one (see
+    // docs/sp404sx-format.md), but not necessarily `bank` itself, since a pattern's storage slot
+    // and the banks its notes reference are independent of each other.
+    std::array<std::shared_ptr<const LoadedBank>, SdCard::numBanks> loadedBanks{};
+    juce::AudioFormatManager formatManager;
+    formatManager.registerBasicFormats();
+    for (const auto& event : pattern->events) {
+        const auto padBank = event.bank();
+        if (!padBank)
+            continue;
+        const auto idx = static_cast<size_t>(*padBank - 'A');
+        if (loadedBanks[idx] == nullptr)
+            loadedBanks[idx] = loadBank(*cardRoot, *padBank, formatManager);
+    }
+
+    auto patternPtr = std::make_shared<const Pattern>(*pattern);
+    {
+        const juce::SpinLock::ScopedLockType lock(patternHandoffLock);
+        pendingPattern = std::move(patternPtr);
+        pendingPatternBanks = loadedBanks;
+    }
+    // release: pairs with processBlock's acquire exchange, so it never sees the flag flip before
+    // the pendingPattern/pendingPatternBanks writes above are visible to it.
+    patternTriggerRequested.store(true, std::memory_order_release);
+
+    // Not realtime-touched (message thread only) -- plain relaxed stores are fine, the audio
+    // thread only reads these for UI polling, not to gate anything timing-sensitive.
+    playingPatternBank.store(bank, std::memory_order_relaxed);
+    playingPatternIndexInBank.store(indexInBank, std::memory_order_relaxed);
+    return true;
 }
 
 void PluginProcessor::handleMidiMessage(const juce::MidiMessage& message) {
@@ -203,13 +314,14 @@ void PluginProcessor::handleMidiMessage(const juce::MidiMessage& message) {
     }
 }
 
-void PluginProcessor::renderVoices(juce::AudioBuffer<float>& buffer, int startSample, int numSamples) {
+void PluginProcessor::renderVoices(juce::AudioBuffer<float>& buffer, int startSample, int numSamples,
+                                    std::span<Voice> voiceSet) {
     if (numSamples <= 0)
         return;
 
     const int outChannels = buffer.getNumChannels();
 
-    for (auto& voice : voices) {
+    for (auto& voice : voiceSet) {
         if (!voice.active || voice.bank == nullptr)
             continue;
 
@@ -272,20 +384,90 @@ void PluginProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiB
         for (auto& voice : voices)
             stopVoice(voice);
 
+    if (patternStopRequested.exchange(false, std::memory_order_relaxed)) {
+        patternPlayer.stop();
+        patternPlayingFlag.store(false, std::memory_order_relaxed);
+    }
+
+    // Queried once per block and reused below for both starting a newly-triggered pattern at the
+    // right tempo and for keeping an already-playing one in sync -- this is *tempo* sync plus
+    // *play/stop* sync, not full bar-aligned *position* sync to the host timeline (see the class's
+    // doc comment in PluginProcessor.h for what that would still take). Hosts that don't report a
+    // play state at all default to "playing", so pattern playback still works when hosted
+    // standalone/by a simple test host with no transport concept.
+    double hostBpm = 120.0;
+    bool hostIsPlaying = true;
+    if (auto* playHead = getPlayHead()) {
+        if (const auto position = playHead->getPosition()) {
+            hostBpm = position->getBpm().orFallback(120.0);
+            hostIsPlaying = position->getIsPlaying();
+        }
+    }
+
+    // acquire: pairs with triggerPattern()'s release store, so the pendingPattern/
+    // pendingPatternBanks reads just below always see that call's writes, not a stale/partial
+    // view of them.
+    if (patternTriggerRequested.exchange(false, std::memory_order_acquire)) {
+        std::shared_ptr<const Pattern> newPattern;
+        {
+            const juce::SpinLock::ScopedLockType lock(patternHandoffLock);
+            newPattern = pendingPattern;
+            activePatternBanks = pendingPatternBanks;
+        }
+        if (newPattern != nullptr) {
+            patternPlayer.start(*newPattern, hostBpm, currentSampleRate);
+            patternPlayingFlag.store(true, std::memory_order_relaxed);
+        }
+    } else {
+        patternPlayer.setTempo(hostBpm);
+    }
+
     // Merges any pending previewPadOn()/previewPadOff() calls (from a UI pad click) into `midi`
     // as real note on/off messages, so they go through the exact same handleMidiMessage() path
     // as actual MIDI input below.
     keyboardState.processNextMidiBuffer(midi, 0, buffer.getNumSamples(), true);
 
+    patternTriggerScratch.clear();
+    if (patternPlayer.isPlaying() && hostIsPlaying)
+        patternPlayer.advance(buffer.getNumSamples(), patternTriggerScratch);
+
+    // Merges the real MIDI buffer (already sample-sorted, guaranteed by JUCE) with
+    // patternTriggerScratch (sorted by construction -- PatternPlayer emits events in the order
+    // its pattern stores them, which readPattern() already requires to be tick-ascending) via a
+    // manual two-pointer walk, so both event sources render at their correct sample-accurate
+    // position within the block without needing to allocate a combined list.
     int samplePos = 0;
-    for (const auto metadata : midi) {
-        const int eventSample = metadata.samplePosition;
-        if (eventSample > samplePos)
-            renderVoices(buffer, samplePos, eventSample - samplePos);
+    auto midiIt = midi.begin();
+    const auto midiEnd = midi.end();
+    size_t patternIdx = 0;
+
+    while (midiIt != midiEnd || patternIdx < patternTriggerScratch.size()) {
+        const int midiSample = midiIt != midiEnd ? (*midiIt).samplePosition : std::numeric_limits<int>::max();
+        const int patternSample =
+            patternIdx < patternTriggerScratch.size() ? patternTriggerScratch[patternIdx].sampleOffsetInBlock
+                                                        : std::numeric_limits<int>::max();
+
+        const int eventSample = std::min(midiSample, patternSample);
+        if (eventSample > samplePos) {
+            renderVoices(buffer, samplePos, eventSample - samplePos, voices);
+            renderVoices(buffer, samplePos, eventSample - samplePos, patternVoices);
+        }
         samplePos = eventSample;
-        handleMidiMessage(metadata.getMessage());
+
+        if (midiSample <= patternSample) {
+            handleMidiMessage((*midiIt).getMessage());
+            ++midiIt;
+        } else {
+            const auto& event = patternTriggerScratch[patternIdx];
+            const auto bankIdx = static_cast<size_t>(event.bank - 'A');
+            if (bankIdx < activePatternBanks.size() && activePatternBanks[bankIdx] != nullptr)
+                triggerVoice(patternVoices, kMaxPatternPolyphony, activePatternBanks[bankIdx],
+                             event.padIndexInBank - 1);
+            ++patternIdx;
+        }
     }
-    renderVoices(buffer, samplePos, buffer.getNumSamples() - samplePos);
+    renderVoices(buffer, samplePos, buffer.getNumSamples() - samplePos, voices);
+    renderVoices(buffer, samplePos, buffer.getNumSamples() - samplePos, patternVoices);
 
     // Master output stage: volume + 3-band EQ, applied to the summed mix of every pad rather
     // than per-voice -- this is deliberately post-mix (see the knob doc comment in
@@ -295,6 +477,11 @@ void PluginProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiB
     juce::dsp::AudioBlock<float> block(buffer);
     outputEq.process(juce::dsp::ProcessContextReplacing<float>(block));
 
+    // Scoped to `voices` only (not patternVoices) -- this mask means "pads of the active bank
+    // shown in the pad grid", and a pattern's voices can belong to a different bank than that,
+    // see triggerPattern()'s doc comment. A pattern hit on a pad that *is* in the active bank
+    // still won't light up here, since it plays through the separate patternVoices pool rather
+    // than `voices` -- a minor, accepted gap (see README), not a correctness issue for playback.
     std::uint16_t mask = 0;
     for (size_t i = 0; i < voices.size(); ++i)
         if (voices[i].active)

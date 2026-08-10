@@ -6,11 +6,15 @@
 #include <filesystem>
 #include <memory>
 #include <optional>
+#include <span>
+#include <vector>
 
 #include <juce_audio_processors/juce_audio_processors.h>
 #include <juce_dsp/juce_dsp.h>
 
 #include "BankLoader.h"
+#include "sp404/PatternPlayer.h"
+#include "sp404/SdCard.h"
 
 namespace sp404 {
 
@@ -96,6 +100,28 @@ public:
     // screen graphic red.
     bool isClipping() const { return clippingFlag.load(std::memory_order_relaxed); }
 
+    // --- Pattern playback (tempo-synced to host BPM + gated on host transport play/stop; NOT
+    // full bar-aligned host-transport-*position* sync -- see README roadmap for what that would
+    // still take) -----------------------------------------------------------------------------
+    // Message-thread only (does file I/O: reads the pattern file plus every bank its events
+    // reference, since a pattern's storage slot and the banks it plays are independent of each
+    // other -- see sp404::patternSlotPath's doc comment). Hands the result to the audio thread
+    // the same way BankLoader hands off its currentBank (see BankLoader.h): a SpinLock-guarded
+    // shared_ptr swap, picked up at the top of the next processBlock. Loops until stopPattern()
+    // is called. Returns false if there's no pattern recorded at that slot.
+    bool triggerPattern(char bank, int indexInBank);
+    // Realtime-safe (single atomic store); the audio thread stops scheduling new triggers at the
+    // top of the next processBlock. Doesn't forcibly silence pads already sounding from the
+    // pattern -- use requestStopAll() for that (same as it already does for live/preview pads).
+    void stopPattern() { patternStopRequested.store(true, std::memory_order_relaxed); }
+    bool isPatternPlaying() const { return patternPlayingFlag.load(std::memory_order_relaxed); }
+    // Which slot triggerPattern() was last called with -- meaningless if isPatternPlaying() is
+    // false. Realtime-safe atomic reads, polled from WebUIBridge so the UI can highlight it.
+    char getPlayingPatternBank() const { return static_cast<char>(playingPatternBank.load(std::memory_order_relaxed)); }
+    int getPlayingPatternIndexInBank() const {
+        return playingPatternIndexInBank.load(std::memory_order_relaxed);
+    }
+
     // --- Knobs (Vol/Ctrl1/Ctrl2/Ctrl3) -------------------------------------------------------
     // setKnobValue is called from the message thread (mouse drag in the UI) and goes through
     // the parameter's normal setValueNotifyingHost path, so host automation/undo see it like any
@@ -158,8 +184,25 @@ private:
     };
 
     void handleMidiMessage(const juce::MidiMessage& message);
-    void renderVoices(juce::AudioBuffer<float>& buffer, int startSample, int numSamples);
+    // voiceSet is a parameter (rather than hardcoded to `voices`) so both live/preview playback
+    // and pattern-triggered playback (see patternVoices below) can share the same mixing loop --
+    // pure parameterization, the per-sample logic itself is unchanged from before pattern
+    // playback existed.
+    void renderVoices(juce::AudioBuffer<float>& buffer, int startSample, int numSamples, std::span<Voice> voiceSet);
     void stopVoice(Voice& voice);
+    // Starts (or retriggers) a voice in voiceSet for bank/padIndex (0-based), stealing the oldest
+    // active voice in voiceSet if it's already at maxPolyphony -- same voice-stealing rule
+    // handleMidiMessage's note-on branch already uses for live MIDI, but generalized to an
+    // arbitrary voice set/bank/polyphony budget rather than hardcoded to `voices`/the currently
+    // armed bank/kMaxPolyphony. Needed because a pattern's events can reference a *different*
+    // bank than whatever's currently armed for live MIDI (see docs/sp404sx-format.md), so pattern
+    // playback needs its own voice pool (patternVoices) that can hold voices from any bank at
+    // once rather than colliding with (or being limited to) live playback's single-armed-bank
+    // pool. Deliberately not used by handleMidiMessage's existing note-on path -- that path's
+    // direct `voices[padIndex]` indexing is untouched, to avoid any risk of changing already-
+    // working live-triggering behaviour while adding this.
+    void triggerVoice(std::span<Voice> voiceSet, int maxPolyphony, std::shared_ptr<const LoadedBank> bank,
+                       int padIndex);
     // Recomputes the low/mid/high filter coefficients from the current knob values. Called once
     // per processBlock (block-rate, not sample-rate -- coefficient calculation is cheap and this
     // keeps the EQ responsive to knob/MIDI-CC moves without needing a smoothed-parameter
@@ -185,6 +228,26 @@ private:
     // ProcessorDuplicator. Order: low shelf, mid peak, high shelf.
     using ShelfFilter = juce::dsp::ProcessorDuplicator<juce::dsp::IIR::Filter<float>, juce::dsp::IIR::Coefficients<float>>;
     juce::dsp::ProcessorChain<ShelfFilter, ShelfFilter, ShelfFilter> outputEq;
+
+    // --- Pattern playback ------------------------------------------------------------------
+    static constexpr int kMaxPatternPolyphony = 4; // separate, modest budget from live playback's kMaxPolyphony
+    std::array<Voice, kMaxPatternPolyphony> patternVoices;
+    sp404::PatternPlayer patternPlayer;
+    std::vector<sp404::PatternTriggerEvent> patternTriggerScratch; // reserved once in the constructor, cleared each block
+
+    // Cross-thread handoff (message thread -> audio thread) of a newly-triggered pattern, exactly
+    // mirroring BankLoader's own SpinLock+shared_ptr pattern for currentBank (see BankLoader.h) --
+    // pragmatic, not wait-free, fine for a rare UI-triggered event rather than something touched
+    // every block.
+    juce::SpinLock patternHandoffLock;
+    std::shared_ptr<const sp404::Pattern> pendingPattern; // set by triggerPattern(), consumed at the top of the next processBlock
+    std::array<std::shared_ptr<const LoadedBank>, SdCard::numBanks> pendingPatternBanks; // parallel to pendingPattern, index = bank - 'A'
+    std::array<std::shared_ptr<const LoadedBank>, SdCard::numBanks> activePatternBanks; // audio-thread-owned; only replaced when a new trigger is consumed
+    std::atomic<bool> patternTriggerRequested{false};
+    std::atomic<bool> patternStopRequested{false};
+    std::atomic<bool> patternPlayingFlag{false};
+    std::atomic<char> playingPatternBank{0};
+    std::atomic<int> playingPatternIndexInBank{0};
 
     // Defaults to offline (mirror) rather than live: safer first-run behaviour (no accidental
     // writes to a connected card) and matches bankLoader's default of Bank A -- "just open and

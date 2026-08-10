@@ -1116,7 +1116,9 @@
             detail = `${slot.bars} bar${slot.bars === 1 ? "" : "s"} · ${refsHtml}`;
           }
           const existingActions = slot.exists
-            ? `<button type="button" class="pattern-btn" data-action="save-pattern">Save…</button>
+            ? `<button type="button" class="pattern-btn" data-action="play-pattern">▶ Play</button>
+               <button type="button" class="pattern-btn danger" data-action="stop-pattern" style="display:none;">■ Stop</button>
+               <button type="button" class="pattern-btn" data-action="save-pattern">Save…</button>
                <button type="button" class="pattern-btn" data-action="copy-pattern">Copy…</button>
                <button type="button" class="pattern-btn" data-action="move-pattern">Move…</button>
                <button type="button" class="pattern-btn" data-action="export-midi">Export MIDI…</button>
@@ -1148,6 +1150,37 @@
         }
         patternsPanelData = data.patterns;
         renderPatternsList(bank, data.patterns);
+        applyPatternPlaybackState(); // re-render loses the Play/Stop toggle state -- restore it immediately
+      });
+    }
+
+    // Only one pattern can play at a time (PluginProcessor owns a single PatternPlayer) -- this
+    // tracks which, so the panel can show "■ Stop" on that row and "▶ Play" everywhere else
+    // without waiting for the next poll tick after a click.
+    let patternPlaybackState = { playing: false, bank: null, indexInBank: null };
+
+    function applyPatternPlaybackState() {
+      if (!patternsPanelBank) return;
+      for (const row of document.querySelectorAll("#patterns-list .pattern-row")) {
+        const indexInBank = Number(row.dataset.indexInBank);
+        const isThisPlaying =
+          patternPlaybackState.playing &&
+          patternPlaybackState.bank === patternsPanelBank &&
+          patternPlaybackState.indexInBank === indexInBank;
+        row.classList.toggle("playing", isThisPlaying);
+        const playBtn = row.querySelector('[data-action="play-pattern"]');
+        const stopBtn = row.querySelector('[data-action="stop-pattern"]');
+        if (playBtn) playBtn.style.display = isThisPlaying ? "none" : "";
+        if (stopBtn) stopBtn.style.display = isThisPlaying ? "" : "none";
+      }
+    }
+
+    function pollPatternPlayback() {
+      if (!patternsPanelBank) return; // no point polling while the panel's closed
+      window.getNativeFunction("getPatternPlaybackState")().then((state) => {
+        patternPlaybackState =
+          state && state.playing ? { playing: true, bank: state.bank, indexInBank: state.indexInBank } : { playing: false, bank: null, indexInBank: null };
+        applyPatternPlaybackState();
       });
     }
 
@@ -1164,6 +1197,7 @@
       document.getElementById("patterns-list").innerHTML = `<p class="pattern-detail">Loading…</p>`;
       document.getElementById("patterns-modal").classList.remove("hidden");
       refreshPatternsList();
+      pollPatternPlayback();
     }
 
     function closePatternsPanel() {
@@ -1299,6 +1333,17 @@
               ? `Pattern ${bank}${indexInBank} imported from MIDI.`
               : `Failed to import MIDI into pattern ${bank}${indexInBank} (no notes on a recognized channel/note?).`;
           if (result && result.ok) refreshPatternsList();
+        } else if (action === "play-pattern") {
+          const result = await window.getNativeFunction("triggerPattern")(bank, indexInBank);
+          statusEl.textContent =
+            result && result.ok
+              ? `Playing pattern ${bank}${indexInBank} (tempo-synced to the host, follows host play/stop).`
+              : `Failed to trigger pattern ${bank}${indexInBank}.`;
+          pollPatternPlayback();
+        } else if (action === "stop-pattern") {
+          await window.getNativeFunction("stopPattern")();
+          statusEl.textContent = `Stopped pattern ${bank}${indexInBank}.`;
+          pollPatternPlayback();
         }
       });
     }
@@ -1519,6 +1564,7 @@
       setInterval(pollClipping, 100);
       setInterval(pollConnection, 2000);
       setInterval(pollKnobs, 150);
+      setInterval(pollPatternPlayback, 300); // no-op while the Patterns panel is closed, see pollPatternPlayback
       wireKnobs();
       wireBankMenu();
       wireDspPanel();

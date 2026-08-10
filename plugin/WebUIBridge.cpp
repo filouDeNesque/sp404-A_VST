@@ -1198,6 +1198,38 @@ juce::WebBrowserComponent::Options makeWebViewOptions(PluginProcessor& processor
                                           juce::WebBrowserComponent::NativeFunctionCompletion completion) {
                                  handleImportPatternMidi(processor, args, completion);
                              })
+        // args: [bankChar, indexInBank]. See PluginProcessor::triggerPattern -- tempo-synced to
+        // the host, gated on host transport play/stop, loops until stopPattern() is called.
+        .withNativeFunction("triggerPattern",
+                             [&processor](const juce::Array<juce::var>& args,
+                                          juce::WebBrowserComponent::NativeFunctionCompletion completion) {
+                                 bool ok = false;
+                                 if (args.size() > 1 && args[0].toString().length() == 1)
+                                     ok = processor.triggerPattern(static_cast<char>(args[0].toString()[0]),
+                                                                    static_cast<int>(args[1]));
+                                 respondOk(ok, completion);
+                             })
+        .withNativeFunction("stopPattern",
+                             [&processor](const juce::Array<juce::var>&,
+                                          juce::WebBrowserComponent::NativeFunctionCompletion completion) {
+                                 processor.stopPattern();
+                                 completion(juce::var());
+                             })
+        // Polled by the UI (same ~150ms cadence as getKnobStates) to highlight whichever pattern
+        // slot is currently playing.
+        .withNativeFunction("getPatternPlaybackState",
+                             [&processor](const juce::Array<juce::var>&,
+                                          juce::WebBrowserComponent::NativeFunctionCompletion completion) {
+                                 auto* response = new juce::DynamicObject();
+                                 const bool playing = processor.isPatternPlaying();
+                                 response->setProperty("playing", playing);
+                                 if (playing) {
+                                     const char bankBuf[2]{processor.getPlayingPatternBank(), '\0'};
+                                     response->setProperty("bank", juce::String(bankBuf));
+                                     response->setProperty("indexInBank", processor.getPlayingPatternIndexInBank());
+                                 }
+                                 completion(juce::var(response));
+                             })
         .withNativeFunction("clearBank",
                              [&processor](const juce::Array<juce::var>& args,
                                           juce::WebBrowserComponent::NativeFunctionCompletion completion) {

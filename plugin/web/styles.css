@@ -708,6 +708,7 @@
     }
     .pattern-row.empty { opacity: 0.7; }
     .pattern-row.warn { border-color: #d94f4f; }
+    .pattern-row.playing { border-color: var(--orange); box-shadow: 0 0 0 1px var(--orange); }
     .pattern-label {
       flex: 0 0 auto;
       font-size: 11px;

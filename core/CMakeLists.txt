@@ -5,6 +5,7 @@ add_library(sp404_core STATIC
     src/WavRlnd.cpp
     src/WavInfo.cpp
     src/Pattern.cpp
+    src/PatternPlayer.cpp
 )
 
 target_include_directories(sp404_core PUBLIC include)

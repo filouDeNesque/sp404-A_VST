@@ -231,7 +231,12 @@ Les tests couvrent `core/` (parsing `PAD_INFO.BIN` et chunk `RLND`), voir
     MIDI…" (slot occupé) écrit un `.mid` standard (potards/pads mappés en note/canal MIDI,
     lisible dans n'importe quel DAW) ; "Import MIDI…" fait l'inverse — quantise un `.mid`
     quelconque sur la grille du pattern et écrit le résultat dans le slot cliqué (confirmé si le
-    slot est déjà occupé).
+    slot est déjà occupé). "▶ Play" déclenche la lecture temps réel du pattern (tempo-synchronisée
+    à l'hôte, gelée si le transport hôte est en pause) — voir la section Roadmap "Triggering de
+    pattern" ci-dessous pour le détail de ce qui est fait/pas fait, **notamment le fait que la
+    lecture audio bout-en-bout n'a pas pu être vérifiée dans un vrai DAW dans cet environnement**.
+    La ligne en cours de lecture se met en surbrillance (bordure orange) et son bouton devient
+    "■ Stop" ; un seul pattern peut jouer à la fois.
 
 ### Provenance des stickers
 
@@ -251,8 +256,11 @@ d'écran personnel.
 ## Architecture
 
 ```
-core/     bibliothèque C++ pure (PadInfo, Bank/Pad, SdCard, WavInfo, RlndChunk, Pattern) — zéro
-          dépendance audio/GUI JUCE, testée indépendamment.
+core/     bibliothèque C++ pure (PadInfo, Bank/Pad, SdCard, WavInfo, RlndChunk, Pattern,
+          PatternPlayer) — zéro dépendance audio/GUI JUCE, testée indépendamment (PatternPlayer
+          en particulier : scheduler de lecture de pattern temps réel, mais lui-même sans aucune
+          dépendance JUCE ni allocation, donc testable offline malgré son usage audio-thread réel
+          — voir la section Roadmap "Triggering de pattern").
 plugin/   cible JUCE (VST3 + AU, synthé), éditeur hébergeant une WebView (JUCE 8
           WebBrowserComponent) qui appelle du code natif via des NativeFunction ;
           BankLoader (thread d'arrière-plan + lecture audio JUCE) et le routage MIDI/mixage
@@ -399,7 +407,57 @@ docs/     spécification du format de carte SD SP-404SX et ses sources.
     marqueur de fin de piste explicite (`juce::MidiMessage::endOfTrack()`, positionné au vrai
     nombre de mesures) préserve le silence de fin d'un pattern à l'export/import, qui serait
     sinon perdu (aucune note n'ancre sa position).
-  - Triggering d'un pattern entier depuis le DAW, synchronisé tempo/transport hôte (au-delà du
-    triggering pad-par-pad actuel) — nécessite un scheduler interne aligné sur
-    `juce::AudioPlayHead`, le plus gros morceau de cette liste.
+  - 🟡 Triggering d'un pattern entier depuis le DAW, synchronisé tempo/transport hôte — fait
+    partiellement, voir le détail complet ci-dessous.
+
+### Triggering de pattern (`sp404::PatternPlayer`, `PluginProcessor`) — état détaillé
+
+**Fait** : un bouton "▶ Play" sur chaque ligne du panneau "Patterns…" déclenche la lecture
+temps réel du pattern, **synchronisée au tempo (BPM) de l'hôte** et **asservie à son
+lecteur** (play/pause de l'hôte = avance/gèle le pattern) — ce n'est **pas** encore un
+alignement complet sur la *position* du transport hôte (voir "Non fait" plus bas).
+
+- `core/include/sp404/PatternPlayer.h`/`.cpp` (nouveau, 100% C++ pur, zéro dépendance JUCE) :
+  scheduler qui convertit les ticks du pattern en échantillons via le BPM courant
+  (`kTicksPerBar`/4 = ticks/temps), boucle indéfiniment jusqu'à l'arrêt, et gère les
+  changements de tempo en cours de lecture sans réinterpréter rétroactivement les échantillons
+  déjà avancés (`setTempo` "commit" la position atteinte avant de changer de taux). Conçu pour
+  être piloté une fois par bloc audio (`advance(numSamples, ...)`) mais sans aucune allocation
+  ni I/O propre, donc testable offline — **10 tests** dans `PatternPlayerTests.cpp`, dont deux
+  tests de dérive (un sur ~700 blocs de taille impaire couvrant une boucle, un sur 200 boucles à
+  une taille de bloc réaliste de 512 échantillons) qui ont effectivement détecté un vrai bug
+  d'accumulation d'erreur flottante lors de l'écriture initiale (corrigé en recalculant la
+  position en ticks à chaque appel depuis un compteur d'échantillons entier exact plutôt qu'en
+  accumulant des résultats déjà arrondis).
+- `PluginProcessor` intègre le scheduler dans `processBlock` : lit `getPlayHead()` une fois par
+  bloc (BPM + `isPlaying`), consomme un pattern nouvellement déclenché via un handoff
+  SpinLock+shared_ptr identique à celui déjà utilisé par `BankLoader` pour `currentBank` (voir
+  `BankLoader.h`), puis fusionne les événements du pattern avec le vrai buffer MIDI (tri par
+  position d'échantillon, sans allocation) pour déclencher les pads au bon instant.
+- **Pool de voix séparé** (`patternVoices`, polyphonie propre de 4) plutôt que de réutiliser le
+  tableau `voices` existant (12 emplacements, un par pad de la banque actuellement armée) : un
+  pattern peut référencer une banque différente de celle armée pour le MIDI live (voir
+  `docs/sp404sx-format.md`), donc un déclenchement de pattern ne doit jamais entrer en conflit
+  avec — ni être limité par — la lecture live/preview en cours. `triggerVoice()` généralise la
+  logique de vol de voix déjà existante dans `handleMidiMessage` (mêmes règles : retrigger du
+  même pad ne compte pas dans la polyphonie, le plus ancien est coupé en premier) sans toucher
+  au chemin MIDI live d'origine, pour garantir zéro risque de régression sur ce qui marchait déjà.
+- Vélocité et note-off/gate des événements de pattern ne sont **pas** modélisés dans cette
+  passe : chaque hit joue à son volume de pad configuré (comme le MIDI live, qui ignore déjà la
+  vélocité) et jusqu'à sa fin naturelle (loop/one-shot), sans coupure anticipée sur un pad en
+  mode `gate` — simplification délibérée pour ce premier tour.
+- **Vérification** : 50/50 `ctest` (10 nouveaux tests `PatternPlayer`), build complet propre,
+  3/3 `auval`. **Limite assumée et importante** : je n'ai pas pu tester la lecture réelle dans
+  un vrai DAW dans cet environnement (pas d'hôte audio disponible) — le scheduler lui-même est
+  vérifié de façon exhaustive en isolation (y compris sous stress de dérive numérique), et
+  l'intégration dans `processBlock` a été relue avec soin, mais le chemin bout-en-bout
+  (déclenchement UI → lecture audible synchronisée dans un vrai hôte) n'a **pas** été confirmé
+  à l'oreille. À tester manuellement avant de considérer cette fonctionnalité fiable en
+  production.
+
+**Non fait** : alignement complet sur la *position* du transport hôte (un pattern démarré
+recommencerait toujours à sa propre mesure 1, pas à la mesure courante de la timeline hôte ; pas
+de verrouillage de phase avec les limites de mesure de l'hôte) ; note-off/gate/vélocité des
+événements de pattern ; jouer plusieurs patterns simultanément (un seul `PatternPlayer` par
+instance de plugin actuellement).
 
