@@ -237,6 +237,12 @@ Les tests couvrent `core/` (parsing `PAD_INFO.BIN` et chunk `RLND`), voir
     lecture audio bout-en-bout n'a pas pu être vérifiée dans un vrai DAW dans cet environnement**.
     La ligne en cours de lecture se met en surbrillance (bordure orange) et son bouton devient
     "■ Stop" ; un seul pattern peut jouer à la fois.
+16. Persistance de session DAW : changer de banque, activer le mode offline, bouger/mapper un
+    potard, sauvegarder le projet DAW, le fermer et le rouvrir devrait restaurer exactement cet
+    état (`PluginProcessor::getStateInformation`/`setStateInformation`, voir Roadmap ci-dessous).
+    Ne restaure pas le contenu de la carte/des patterns eux-mêmes, qui vivent sur disque
+    indépendamment du projet DAW. Non testé sur un vrai cycle save/close/reopen faute d'hôte
+    disponible dans cet environnement — seulement vérifié par `auval` et relecture du code.
 
 ### Provenance des stickers
 
@@ -315,9 +321,23 @@ docs/     spécification du format de carte SD SP-404SX et ses sources.
   matériel réel — voir `docs/sp404sx-format.md`).
 - Détection de carte SD sur Windows/Linux si le projet s'étend au-delà de macOS (pour l'instant
   `findConnectedCardRoot()` ne scanne que `/Volumes`).
-- Persistance d'état (banque active, mode offline/live) dans la session DAW
-  (`getStateInformation` est actuellement un no-op — le mode offline/live et le miroir
-  survivent sur disque, mais pas la sélection "on était en offline" au rechargement du plugin).
+- ✅ Persistance d'état dans la session DAW (`PluginProcessor::getStateInformation`/
+  `setStateInformation`, XML via `AudioProcessor::copyXmlToBinary`/`getXmlFromBinary` — la
+  convention JUCE standard pour ça, plutôt que le JSON déjà utilisé ailleurs dans ce projet pour
+  `Prefs.json`, pour rester dans les clous de ce que les hôtes/outils s'attendent à trouver dans
+  l'état d'un plugin). Sauvegarde/restaure : la banque active (la *dernière demandée*, via un
+  nouveau `lastRequestedBank`, pas forcément celle déjà chargée par `BankLoader` en tâche de
+  fond au moment de la sauvegarde — sinon on sauvegarderait parfois la banque précédente) ; le
+  mode offline/live ; la valeur et le mapping CC de chacun des 4 potards (nouveau `setKnobCc`
+  pour restaurer un mapping sans repasser par le flow d'apprentissage MIDI). Volontairement
+  **pas** sauvegardé : le contenu de la carte/des patterns, qui vit déjà sur disque (la carte
+  réelle ou le miroir offline), pas dans l'état du projet DAW — un peu comme les patches d'un
+  sampler matériel ne font pas partie d'un projet DAW non plus. Vérifié par `auval` (qui exerce
+  l'aller-retour état lors de sa suite standard) et relecture attentive du code — contrairement
+  au scheduler de pattern, ce mécanisme est un simple aller-retour d'attributs XML sans logique
+  temporelle, donc un risque de régression nettement plus faible ; **non testé en revanche** sur
+  un vrai cycle sauvegarde-projet/fermeture/réouverture dans un DAW réel (pas d'hôte disponible
+  dans cet environnement).
 - Gestion des patterns (`ROLAND/SP-404SX/PTN/PTNxxxxx.BIN`, `STPINFO.BIN`).
   - ✅ **Préalable obligatoire vérifié (2026-08-09)** : format `PTN` vérifié contre 3 vrais
     fichiers d'une carte SD SP-404SX réelle (croisé avec la classe `AudioPattern` d'

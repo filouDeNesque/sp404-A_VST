@@ -502,6 +502,46 @@ void PluginProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiB
     clippingFlag.store(clipHoldSamplesRemaining > 0, std::memory_order_relaxed);
 }
 
+void PluginProcessor::getStateInformation(juce::MemoryBlock& destData) {
+    juce::XmlElement xml("SP404CompanionState");
+    xml.setAttribute("formatVersion", 1);
+    xml.setAttribute("activeBank",
+                      juce::String::charToString(static_cast<juce::juce_wchar>(lastRequestedBank.load(std::memory_order_relaxed))));
+    xml.setAttribute("offlineMode", isOfflineMode());
+
+    for (int i = 0; i < kNumKnobs; ++i) {
+        auto* knobXml = xml.createNewChildElement("Knob");
+        knobXml->setAttribute("index", i);
+        knobXml->setAttribute("value", getKnobValue(i));
+        knobXml->setAttribute("cc", getKnobCc(i));
+    }
+
+    copyXmlToBinary(xml, destData);
+}
+
+void PluginProcessor::setStateInformation(const void* data, int sizeInBytes) {
+    const std::unique_ptr<juce::XmlElement> xml(getXmlFromBinary(data, sizeInBytes));
+    if (xml == nullptr || xml->getTagName() != "SP404CompanionState")
+        return; // not our XML (e.g. a corrupt/foreign project file) -- leave current state as-is
+
+    const auto bankStr = xml->getStringAttribute("activeBank", "A");
+    if (bankStr.length() == 1) {
+        const char bank = static_cast<char>(bankStr[0]);
+        if (bank >= 'A' && bank <= 'J')
+            requestBankChange(bank);
+    }
+
+    setOfflineMode(xml->getBoolAttribute("offlineMode", false));
+
+    for (auto* knobXml : xml->getChildWithTagNameIterator("Knob")) {
+        const int index = knobXml->getIntAttribute("index", -1);
+        if (index < 0 || index >= kNumKnobs)
+            continue;
+        setKnobValue(index, knobXml->getIntAttribute("value", 64));
+        setKnobCc(index, knobXml->getIntAttribute("cc", -1));
+    }
+}
+
 juce::AudioProcessorEditor* PluginProcessor::createEditor() {
     return new PluginEditor(*this);
 }

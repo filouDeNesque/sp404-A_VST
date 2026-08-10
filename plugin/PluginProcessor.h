@@ -62,13 +62,24 @@ public:
     const juce::String getProgramName(int) override { return {}; }
     void changeProgramName(int, const juce::String&) override {}
 
-    void getStateInformation(juce::MemoryBlock&) override {}
-    void setStateInformation(const void*, int) override {}
+    // Persists the active bank, offline/live mode, and the 4 knobs' values/CC mappings into the
+    // DAW project (as XML, the standard JUCE convention for this -- see
+    // AudioProcessor::copyXmlToBinary/getXmlFromBinary). Deliberately not everything the plugin
+    // has: card contents/patterns already live on disk (the card itself or the offline mirror),
+    // not in DAW project state, matching how e.g. a hardware sampler's own patches aren't part of
+    // a DAW project either -- only *this instance's* transient UI/mapping state is.
+    void getStateInformation(juce::MemoryBlock& destData) override;
+    void setStateInformation(const void* data, int sizeInBytes) override;
 
     // Called from WebUIBridge (message thread, on a UI bank click) or internally from
     // processBlock (audio thread, on a Program Change message) -- realtime-safe either way, see
-    // BankLoader::requestBank().
-    void requestBankChange(char bankName) { bankLoader.requestBank(bankName); }
+    // BankLoader::requestBank(). Also records the requested letter (independent of whether
+    // BankLoader's background load has actually finished) so getStateInformation saves the
+    // user's actual selection, not whatever happens to be loaded at save time.
+    void requestBankChange(char bankName) {
+        bankLoader.requestBank(bankName);
+        lastRequestedBank.store(bankName, std::memory_order_relaxed);
+    }
 
     // Called from WebUIBridge (message thread, on a pad mousedown/mouseup in the UI) to preview
     // a pad of the active bank, padIndex 0-11. Safe to call from any thread: goes through
@@ -147,6 +158,13 @@ public:
     int getKnobCc(int knobIndex) const {
         return (knobIndex >= 0 && knobIndex < kNumKnobs) ? knobCcNumbers[static_cast<size_t>(knobIndex)].load(std::memory_order_relaxed) : -1;
     }
+    // Sets a knob's CC mapping directly (ccOrMinusOne == -1 means "unmapped"), bypassing the
+    // learn flow -- used by setStateInformation() to restore a mapping saved with the DAW
+    // project. Realtime-safe (single atomic store), same as the rest of this section.
+    void setKnobCc(int knobIndex, int ccOrMinusOne) {
+        if (knobIndex >= 0 && knobIndex < kNumKnobs)
+            knobCcNumbers[static_cast<size_t>(knobIndex)].store(ccOrMinusOne, std::memory_order_relaxed);
+    }
 
     // --- Offline/live sync mode ---------------------------------------------------------------
     // Live (default): every card access resolves the actually-connected SD card
@@ -218,6 +236,7 @@ private:
     std::atomic<bool> clippingFlag{false};
     double currentSampleRate = 44100.0;
     int clipHoldSamplesRemaining = 0;
+    std::atomic<char> lastRequestedBank{'A'}; // see requestBankChange()/getStateInformation()
 
     std::array<juce::AudioParameterInt*, kNumKnobs> knobParams{};
     std::array<std::atomic<int>, kNumKnobs> knobCcNumbers{};
