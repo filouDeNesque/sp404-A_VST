@@ -690,6 +690,49 @@
       });
     }
 
+    function sleep(ms) {
+      return new Promise((resolve) => setTimeout(resolve, ms));
+    }
+
+    // Runs a native "start<Foo>" function that kicks off a save/load/sync operation on a
+    // background thread (see BackgroundOperation.h/handleGetOperationProgress in WebUIBridge.cpp)
+    // and shows #progress-modal (spinner + step label + progress bar) until it's done, polling
+    // "getOperationProgress" every 120ms. `title` is the modal's static heading (e.g. "Saving...")
+    // -- the per-step detail line comes from the operation's own progress labels. Resolves to
+    // that operation's own result object (e.g. {ok, exportedCount}) once done, or null if the
+    // native side refused to start (already an operation running -- shouldn't normally happen
+    // since the menu only lets you trigger one at a time, but guards against a rapid double-click
+    // starting two at once).
+    async function runBackgroundOperation(startFnName, startArgs, title) {
+      const overlay = document.getElementById("progress-modal");
+      const titleEl = document.getElementById("progress-title");
+      const fillEl = document.getElementById("progress-fill");
+      const detailEl = document.getElementById("progress-detail");
+
+      titleEl.textContent = title;
+      fillEl.style.width = "0%";
+      detailEl.textContent = "";
+      overlay.classList.remove("hidden");
+
+      try {
+        const startResult = await window.getNativeFunction(startFnName)(...startArgs);
+        if (!startResult || !startResult.started) return null;
+
+        const getProgress = window.getNativeFunction("getOperationProgress");
+        while (true) {
+          const snapshot = await getProgress();
+          if (snapshot && snapshot.total > 0) {
+            fillEl.style.width = `${Math.min(100, (snapshot.current / snapshot.total) * 100)}%`;
+            detailEl.textContent = `${snapshot.label || ""} (${snapshot.current}/${snapshot.total})`;
+          }
+          if (snapshot && snapshot.done) return snapshot.result || null;
+          await sleep(120);
+        }
+      } finally {
+        overlay.classList.add("hidden");
+      }
+    }
+
     // Lets the user pick a destination bank (A-J) when restoring a single-bank backup -- may
     // differ from the bank it was saved from (see sp404::loadBankFromZip, which handles the
     // sample-file renaming this implies). Resolves the chosen letter, or null if cancelled.
@@ -863,7 +906,7 @@
         "save-all": async () => {
           const picked = await window.getNativeFunction("pickZipToSave")("SP404_AllBanks.zip");
           if (picked.cancelled) return;
-          const result = await window.getNativeFunction("saveAllBanksToZip")(picked.path);
+          const result = await runBackgroundOperation("saveAllBanksToZip", [picked.path], "Saving all banks...");
           statusEl.textContent =
             result && result.ok ? `Saved all banks to ${picked.path}.` : "Failed to save all banks.";
         },
@@ -874,7 +917,7 @@
             "This replaces every bank on the card with the backup's contents. This cannot be undone. Continue?"
           );
           if (!confirmed) return;
-          const result = await window.getNativeFunction("loadAllBanksFromZip")(picked.path);
+          const result = await runBackgroundOperation("loadAllBanksFromZip", [picked.path], "Loading all banks...");
           statusEl.textContent = result && result.ok ? "All banks restored." : "Failed to load the backup.";
           if (result && result.ok) refreshAfterFileChange(currentBank());
         },
@@ -886,7 +929,7 @@
           }
           const picked = await window.getNativeFunction("pickZipToSave")(`SP404_Bank_${bank}.zip`);
           if (picked.cancelled) return;
-          const result = await window.getNativeFunction("saveBankToZip")(bank, picked.path);
+          const result = await runBackgroundOperation("saveBankToZip", [bank, picked.path], `Saving bank ${bank}...`);
           statusEl.textContent =
             result && result.ok ? `Saved bank ${bank} to ${picked.path}.` : `Failed to save bank ${bank}.`;
         },
@@ -904,7 +947,11 @@
             `This replaces all 12 pads of bank ${target} with bank ${info.savedFromBank}'s backup. This cannot be undone. Continue?`
           );
           if (!confirmed) return;
-          const result = await window.getNativeFunction("loadBankFromZip")(picked.path, target);
+          const result = await runBackgroundOperation(
+            "loadBankFromZip",
+            [picked.path, target],
+            `Loading bank ${target}...`
+          );
           statusEl.textContent =
             result && result.ok
               ? `Bank ${target} restored from bank ${info.savedFromBank}'s backup.`
@@ -938,7 +985,7 @@
             await window.getNativeFunction("exitOfflineMode")();
             statusEl.textContent = "Back to live mode -- editing the connected SD card directly.";
           } else {
-            const result = await window.getNativeFunction("enterOfflineMode")();
+            const result = await runBackgroundOperation("enterOfflineMode", [], "Preparing offline mirror...");
             statusEl.textContent =
               result && result.ok
                 ? "Offline mode -- editing a local mirror. Use \"Sync Mirror → Card\" when ready."
@@ -952,7 +999,7 @@
             "This overwrites the connected SD card with the offline mirror's contents. This cannot be undone. Continue?"
           );
           if (!confirmed) return;
-          const result = await window.getNativeFunction("syncMirrorToCard")();
+          const result = await runBackgroundOperation("syncMirrorToCard", [], "Syncing mirror to card...");
           statusEl.textContent =
             result && result.ok ? "Mirror synced to the connected card." : "Sync failed (is a card connected?).";
         },
@@ -968,7 +1015,11 @@
         "export-all-patterns-midi": async () => {
           const picked = await window.getNativeFunction("pickZipToSave")("SP404_AllPatterns_MIDI.zip");
           if (picked.cancelled) return;
-          const result = await window.getNativeFunction("exportAllPatternsMidi")(picked.path);
+          const result = await runBackgroundOperation(
+            "exportAllPatternsMidi",
+            [picked.path],
+            "Exporting all patterns..."
+          );
           if (!result || !result.ok) {
             statusEl.textContent = "Failed to export patterns.";
           } else if (result.exportedCount === 0) {
@@ -984,7 +1035,11 @@
             "This replaces every pattern on the card with the ones in this backup. This cannot be undone. Continue?"
           );
           if (!confirmed) return;
-          const result = await window.getNativeFunction("loadAllPatternsMidi")(picked.path);
+          const result = await runBackgroundOperation(
+            "loadAllPatternsMidi",
+            [picked.path],
+            "Loading all patterns..."
+          );
           if (!result || !result.ok) {
             statusEl.textContent = "Not a recognizable \"Export All Patterns\" backup, or failed to read it.";
           } else {

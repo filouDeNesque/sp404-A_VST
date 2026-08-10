@@ -283,25 +283,45 @@ void clearAllBanks(const std::filesystem::path& sdRoot) {
         clearBank(sdRoot, bankName);
 }
 
-void syncCard(const std::filesystem::path& sourceRoot, const std::filesystem::path& destRoot) {
-    const auto sourcePadInfo = smplDir(sourceRoot) / "PAD_INFO.BIN";
+void syncCard(const std::filesystem::path& sourceRoot, const std::filesystem::path& destRoot,
+              ProgressCallback onProgress) {
+    const auto sourceSmpl = smplDir(sourceRoot);
+    const auto sourcePadInfo = sourceSmpl / "PAD_INFO.BIN";
     std::error_code sizeEc;
     const auto size = std::filesystem::file_size(sourcePadInfo, sizeEc);
     const auto expectedSize = static_cast<uintmax_t>(SdCard::totalPads) * PadInfo::encodedSize;
     if (sizeEc || size != expectedSize)
         throw std::runtime_error("syncCard: source has no valid PAD_INFO.BIN at " + sourcePadInfo.string());
 
-    // Validate BEFORE touching destRoot -- an invalid source must never leave destRoot wiped.
+    // Enumerated (so the total file count is known upfront for progress reporting) and validated
+    // BEFORE touching destRoot -- an invalid/unreadable source must never leave destRoot wiped.
+    std::vector<std::filesystem::path> files;
+    std::error_code iterEc;
+    for (const auto& entry : std::filesystem::directory_iterator(sourceSmpl, iterEc)) {
+        if (iterEc)
+            throw std::runtime_error("syncCard: failed listing " + sourceSmpl.string() + ": " + iterEc.message());
+        if (entry.is_regular_file())
+            files.push_back(entry.path());
+    }
+    if (iterEc)
+        throw std::runtime_error("syncCard: failed listing " + sourceSmpl.string() + ": " + iterEc.message());
+
     const auto destSmpl = smplDir(destRoot);
     std::filesystem::remove_all(destSmpl);
     std::filesystem::create_directories(destSmpl);
 
-    std::error_code copyEc;
-    std::filesystem::copy(smplDir(sourceRoot), destSmpl,
-                           std::filesystem::copy_options::recursive | std::filesystem::copy_options::overwrite_existing,
-                           copyEc);
-    if (copyEc)
-        throw std::runtime_error("syncCard: failed copying to " + destSmpl.string() + ": " + copyEc.message());
+    const int total = static_cast<int>(files.size());
+    int current = 0;
+    for (const auto& file : files) {
+        ++current;
+        std::error_code copyEc;
+        std::filesystem::copy_file(file, destSmpl / file.filename(), std::filesystem::copy_options::overwrite_existing,
+                                    copyEc);
+        if (copyEc)
+            throw std::runtime_error("syncCard: failed copying " + file.filename().string() + ": " + copyEc.message());
+        if (onProgress)
+            onProgress(current, total, file.filename().string());
+    }
 }
 
 } // namespace sp404

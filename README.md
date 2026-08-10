@@ -375,6 +375,64 @@ docs/     spécification du format de carte SD SP-404SX et ses sources.
 
 - Détection de carte SD sur Windows/Linux si le projet s'étend au-delà de macOS (pour l'instant
   `findConnectedCardRoot()` ne scanne que `/Volumes`).
+- ✅ **Barre de progression étape par étape pour Save/Load/Sync** (2026-08-10, sur demande) :
+  Save All Banks, Load All Banks, Save This Bank, Load A Bank, Export All Patterns (MIDI), Load
+  All Patterns (MIDI), Go Offline… (première préparation du miroir) et Sync Mirror → Card
+  affichent désormais une modale avec spinner + libellé d'étape + barre de progression
+  (`#progress-modal`, `runBackgroundOperation` dans `app.js`) au lieu de simplement geler l'UI
+  jusqu'à la fin — potentiellement plusieurs secondes pour une carte pleine (des dizaines à
+  centaines de fichiers).
+  - **Nouveau : `sp404::ProgressCallback`** (`core/include/sp404/Progress.h`,
+    `std::function<void(int current, int total, const std::string& label)>`, zéro dépendance
+    JUCE) — paramètre optionnel (`= {}`, donc aucun appelant existant à casser) ajouté à
+    `syncCard` (`core/`), et `saveAllBanksToZip`/`loadAllBanksFromZip`/`saveBankToZip`/
+    `loadBankFromZip` (`plugin/BankArchive.h`/`.cpp`) et `exportAllPatternsToMidiZip`/
+    `loadAllPatternsFromMidiZip` (`plugin/PatternArchive.h`/`.cpp`). `syncCard` copiait jusqu'ici
+    tout `SMPL/` en un seul appel `std::filesystem::copy` récursif — réécrit en boucle
+    fichier-par-fichier (les fichiers sont d'abord énumérés dans un vecteur, donc le total est
+    connu dès le départ pour la barre de progression, et la validation "avant de toucher la
+    destination" reste garantie). `loadAllBanksFromZip` utilisait `ZipFile::uncompressTo` en un
+    bloc — réécrit en boucle `uncompressEntry` par entrée pour le même motif. La compression
+    elle-même (`ZipFile::Builder::writeToStream`) reste une seule étape non subdivisée : l'API
+    JUCE n'expose sa progression que via un pointeur `double*` pensé pour être lu depuis un
+    *autre* thread pendant l'appel bloquant — pas utilisé ici (aurait demandé un thread
+    supplémentaire rien que pour le lire) ; un dernier libellé "Compressing archive..." couvre
+    cette étape sans pourcentage détaillé.
+  - **Nouveau : `sp404::BackgroundOperation`** (`plugin/BackgroundOperation.h`/`.cpp`) — fait
+    tourner une opération sur un thread séparé (`std::thread`) plutôt que de bloquer le thread
+    message (et donc toute la WebView) pendant potentiellement plusieurs secondes ; republie
+    current/total/label (atomiques + `juce::SpinLock` pour le libellé/résultat, partagés avec le
+    thread appelant) pour un `poll()` sûr depuis le thread message. Une seule opération à la fois
+    par instance (`start()` refuse une deuxième tant que la première tourne — suffisant puisque
+    l'UI ne déclenche jamais deux actions du menu en même temps) ; le destructeur attend
+    (`join()`) qu'une opération en cours se termine plutôt que de la couper à mi-écriture — un
+    zip/sync à moitié fait serait pire qu'un plugin qui met un instant de plus à se fermer.
+    `PluginProcessor::backgroundOperation()` (nouveau membre, dernier déclaré dans la classe donc
+    détruit *avant* tous les autres — voir le commentaire dans `PluginProcessor.h` — pour que le
+    thread en fond puisse toucher `offlineMode` etc. en toute sécurité tant qu'il tourne).
+  - **`WebUIBridge.cpp`** : les 8 handlers ci-dessus deviennent des `start<Nom>` qui lancent le
+    travail en fond et répondent `{started}` immédiatement, plus un nouveau `getOperationProgress`
+    partagé que l'UI sonde toutes les 120ms (`{running, done, current, total, label, result}` —
+    `result` n'est peuplé qu'une fois `done`, avec exactement la même forme que l'ancienne
+    réponse synchrone de chaque opération, ex. `{ok, exportedCount}`).
+  - **Volontairement pas couvert** : les opérations sur un seul élément (Save/Load Pattern
+    unique, import d'un sample par glisser-déposer) restent synchrones sans barre de progression
+    — quelques fichiers tout au plus, terminées en une fraction de seconde, une barre de
+    progression n'y aurait rien montré d'utile.
+  - **Vérification** : `syncCard` — nouveau test `ctest` dédié à la progression (current 1-based
+    strictement croissant, total constant, libellé non vide). `BankArchive.cpp`/
+    `BackgroundOperation` — harnais offline jetable (retiré après usage) : `saveAllBanksToZip`
+    rapporte bien N étapes fichier + 1 "Compressing...", `loadAllBanksFromZip` rapporte une étape
+    par entrée du zip, `saveBankToZip`/`loadBankFromZip` rapportent 12 étapes (un par pad) ;
+    `BackgroundOperation` vérifié isolément — état initial idle, refus d'un second `start()`
+    pendant qu'une opération tourne, progression bien observable via `poll()` pendant l'exécution,
+    résultat final correct une fois `done`, et une nouvelle opération peut redémarrer après. 69/69
+    `ctest`, build propre, 3/3 `auval` (dont le cycle chargement/déchargement répété du plugin par
+    `auval`, qui exerce indirectement le join du thread au moment de la destruction).
+  - **Non testé** : le rendu visuel réel de la modale de progression dans un navigateur/WebView
+    (pas d'environnement graphique disponible ici) — la logique de progression elle-même est
+    vérifiée de bout en bout côté natif, mais l'affichage (spinner, barre, mise en forme du
+    libellé) n'a pas pu être observé à l'écran.
 - ✅ **Chunk WAV `RLND`** (2026-08-10) : vérifié byte-for-byte contre une vraie carte SD SP-404SX
   (device, les 4 octets "unknown", `SampleIndex` — voir `docs/sp404sx-format.md`) puis branché
   dans le pipeline d'écriture (`sp404::encodeWavWithRlndChunk`, `core/include/sp404/WavRlnd.h`/

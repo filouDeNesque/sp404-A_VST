@@ -6,6 +6,7 @@
 #include <vector>
 
 #include "sp404/Bank.h"
+#include "sp404/Progress.h"
 
 namespace sp404 {
 
@@ -140,7 +141,10 @@ void clearAllBanks(const std::filesystem::path& sdRoot);
 // SMPL/ first). Used both to seed an offline mirror from a real card and to push a mirror's
 // changes back to a real card ("Synchroniser") -- see plugin/PluginProcessor.h. Throws
 // std::runtime_error if sourceRoot doesn't have a valid PAD_INFO.BIN (destRoot is never touched
-// in that case).
-void syncCard(const std::filesystem::path& sourceRoot, const std::filesystem::path& destRoot);
+// in that case). If onProgress is set, it's called once per file copied (current = number of
+// files copied so far, including the one just finished; total = file count in sourceRoot's SMPL/,
+// known upfront since files are enumerated before any copying starts; label = that file's name).
+void syncCard(const std::filesystem::path& sourceRoot, const std::filesystem::path& destRoot,
+              ProgressCallback onProgress = {});
 
 } // namespace sp404

@@ -5,6 +5,8 @@
 #include <filesystem>
 #include <set>
 
+#include "sp404/Progress.h"
+
 namespace sp404 {
 
 // Zips one pattern slot's raw PTNxxxxx.BIN bytes plus every distinct pad it references (their
@@ -67,9 +69,14 @@ struct ExportAllPatternsResult {
 // "<Bank><2-digit pad>.mid" (e.g. "A01.mid"), one per slot that actually has a pattern recorded
 // -- empty slots are silently skipped, not an error. `ok` is false only if the zip itself
 // couldn't be written; exportedCount == 0 (a card with no patterns at all) still leaves ok true
-// (an empty zip), so the caller can tell "nothing to export" apart from "failed to write".
+// (an empty zip), so the caller can tell "nothing to export" apart from "failed to write". If
+// onProgress is set, called once per slot *checked* (current/total out of the fixed 120 possible
+// slots, known upfront regardless of how many are actually occupied; label = that slot's
+// "<Bank><2-digit pad>", e.g. "A01") -- not once per slot actually exported, so progress is smooth
+// and predictable even though most checks are a fast no-op for an empty slot.
 ExportAllPatternsResult exportAllPatternsToMidiZip(const std::filesystem::path& sdRoot,
-                                                    const juce::File& zipDestination);
+                                                    const juce::File& zipDestination,
+                                                    ProgressCallback onProgress = {});
 
 struct LoadAllPatternsResult {
     bool ok = false;
@@ -85,7 +92,10 @@ struct LoadAllPatternsResult {
 // Otherwise every existing pattern is cleared first (sp404::clearAllPatterns, same "clobber and
 // don't merge" rule as every other Load in this app -- a slot missing from this zip ends up
 // empty, not left over from before), then each matched entry is imported. `importedCount` can be
-// lower than the number of matching entries if some fail to parse as MIDI.
-LoadAllPatternsResult loadAllPatternsFromMidiZip(const std::filesystem::path& sdRoot, const juce::File& zipFile);
+// lower than the number of matching entries if some fail to parse as MIDI. If onProgress is set,
+// called once per matching entry imported (current/total out of the matching-entry count found
+// during validation, known upfront; label = that slot's "<Bank><2-digit pad>").
+LoadAllPatternsResult loadAllPatternsFromMidiZip(const std::filesystem::path& sdRoot, const juce::File& zipFile,
+                                                  ProgressCallback onProgress = {});
 
 } // namespace sp404

@@ -1,6 +1,7 @@
 #include "BankArchive.h"
 
 #include <fstream>
+#include <string>
 #include <system_error>
 #include <vector>
 
@@ -22,31 +23,52 @@ juce::File tempScratchDir(const juce::String& label) {
 
 } // namespace
 
-bool saveAllBanksToZip(const std::filesystem::path& sdRoot, const juce::File& zipDestination) {
+bool saveAllBanksToZip(const std::filesystem::path& sdRoot, const juce::File& zipDestination,
+                       ProgressCallback onProgress) {
     const auto smplDirPath = smplDir(sdRoot);
 
     std::error_code ec;
     if (!std::filesystem::is_directory(smplDirPath, ec) || ec)
         return false;
 
-    juce::ZipFile::Builder builder;
+    // Gathered into a vector first (rather than adding to the builder inline) so the total file
+    // count is known upfront for progress reporting, same reasoning as syncCard.
+    std::vector<juce::File> files;
     for (const auto& entry : std::filesystem::directory_iterator(smplDirPath, ec)) {
         if (ec)
             return false;
-        if (!entry.is_regular_file())
-            continue;
-        const juce::File f(entry.path().string());
+        if (entry.is_regular_file())
+            files.emplace_back(entry.path().string());
+    }
+    if (ec)
+        return false;
+
+    juce::ZipFile::Builder builder;
+    const int total = static_cast<int>(files.size());
+    int current = 0;
+    for (const auto& f : files) {
         builder.addFile(f, 6, f.getFileName());
+        ++current;
+        if (onProgress)
+            onProgress(current, total, f.getFileName().toStdString());
     }
 
     zipDestination.deleteFile();
     std::unique_ptr<juce::FileOutputStream> out = zipDestination.createOutputStream();
     if (out == nullptr)
         return false;
+    // JUCE's zip writer doesn't expose a per-file progress hook usable from outside this blocking
+    // call (writeToStream's own `double*` progress parameter is designed to be polled from a
+    // *different* thread while this one blocks inside it -- not worth the extra thread just for
+    // this one step, see plugin/BackgroundOperation.h for where the coarser per-file progress
+    // above already gets to the UI). One last step marks that compression is underway.
+    if (onProgress)
+        onProgress(total, total, "Compressing archive...");
     return builder.writeToStream(*out, nullptr);
 }
 
-bool loadAllBanksFromZip(const std::filesystem::path& sdRoot, const juce::File& zipFile) {
+bool loadAllBanksFromZip(const std::filesystem::path& sdRoot, const juce::File& zipFile,
+                         ProgressCallback onProgress) {
     if (!zipFile.existsAsFile())
         return false;
 
@@ -54,10 +76,15 @@ bool loadAllBanksFromZip(const std::filesystem::path& sdRoot, const juce::File& 
     const auto tempDir = tempScratchDir("sp404_load_all");
     tempDir.createDirectory();
 
-    const auto uncompressResult = zip.uncompressTo(tempDir, true);
-    if (uncompressResult.failed()) {
-        tempDir.deleteRecursively();
-        return false;
+    const int numEntries = zip.getNumEntries();
+    for (int i = 0; i < numEntries; ++i) {
+        const auto* entry = zip.getEntry(i);
+        if (zip.uncompressEntry(i, tempDir, true).failed()) {
+            tempDir.deleteRecursively();
+            return false;
+        }
+        if (onProgress)
+            onProgress(i + 1, numEntries, entry != nullptr ? entry->filename.toStdString() : std::string());
     }
 
     // Validate BEFORE touching the real SMPL/ folder -- an invalid/corrupt zip must never leave
@@ -81,7 +108,8 @@ bool loadAllBanksFromZip(const std::filesystem::path& sdRoot, const juce::File& 
     return true;
 }
 
-bool saveBankToZip(const std::filesystem::path& sdRoot, char bankName, const juce::File& zipDestination) {
+bool saveBankToZip(const std::filesystem::path& sdRoot, char bankName, const juce::File& zipDestination,
+                   ProgressCallback onProgress) {
     if (bankName < 'A' || bankName > 'J')
         return false;
 
@@ -116,6 +144,8 @@ bool saveBankToZip(const std::filesystem::path& sdRoot, char bankName, const juc
             if (std::filesystem::exists(realPath))
                 builder.addFile(juce::File(realPath.string()), 6, padEntryName(i, format));
         }
+        if (onProgress)
+            onProgress(i, Bank::padCount, "Pad " + std::to_string(i));
     }
 
     zipDestination.deleteFile();
@@ -149,7 +179,8 @@ BankZipInfo peekBankZip(const juce::File& zipFile) {
     return info;
 }
 
-bool loadBankFromZip(const std::filesystem::path& sdRoot, const juce::File& zipFile, char targetBank) {
+bool loadBankFromZip(const std::filesystem::path& sdRoot, const juce::File& zipFile, char targetBank,
+                     ProgressCallback onProgress) {
     if (targetBank < 'A' || targetBank > 'J')
         return false;
 
@@ -197,6 +228,8 @@ bool loadBankFromZip(const std::filesystem::path& sdRoot, const juce::File& zipF
                 continue;
             destStream->writeFromInputStream(*entryStream, -1);
         }
+        if (onProgress)
+            onProgress(i, Bank::padCount, "Pad " + std::to_string(i));
     }
 
     return true;

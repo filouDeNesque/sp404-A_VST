@@ -12,6 +12,7 @@
 #include <juce_audio_processors/juce_audio_processors.h>
 #include <juce_dsp/juce_dsp.h>
 
+#include "BackgroundOperation.h"
 #include "BankLoader.h"
 #include "sp404/PatternPlayer.h"
 #include "sp404/SdCard.h"
@@ -193,6 +194,13 @@ public:
     // rather than sibling directory since this is a single small file, not a mirrored folder tree.
     static std::filesystem::path prefsPath();
 
+    // Save/Load/Sync menu actions run on this rather than blocking the message thread for
+    // however long a multi-hundred-file zip/sync takes -- see BackgroundOperation.h. One shared
+    // instance for all of them (bank and pattern operations alike): the UI only ever drives one
+    // such action at a time, and BackgroundOperation itself rejects a second start() while one is
+    // still running.
+    sp404::BackgroundOperation& backgroundOperation() { return backgroundOp; }
+
 private:
     struct Voice {
         std::shared_ptr<const LoadedBank> bank; // captured at trigger time, see BankLoader.h
@@ -295,6 +303,8 @@ private:
     // resolveCardRoot() already fall back to "no card" if the mirror isn't seeded yet, so this
     // is safe even on a machine that's never used offline mode before.
     std::atomic<bool> offlineMode{true};
+
+    sp404::BackgroundOperation backgroundOp;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(PluginProcessor)
 };

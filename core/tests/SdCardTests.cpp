@@ -2,6 +2,8 @@
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
+#include <string>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -429,6 +431,31 @@ TEST_CASE("syncCard copies source's SMPL/ contents onto destination, replacing w
     CHECK(card.banks()[0].pads[0].info.volume == 55);
     CHECK(card.banks()[0].pads[0].info.loop == true);
     CHECK_FALSE(card.banks()[2].pads[0].samplePath.has_value()); // dest's own C1 is gone
+
+    std::filesystem::remove_all(source);
+    std::filesystem::remove_all(dest);
+}
+
+TEST_CASE("syncCard reports progress once per file, with a correct final current/total", "[SdCard]") {
+    const auto source = makeSyntheticCard("sp404_core_test_sync_progress_src");
+    sp404::replacePadSample(source, 'A', 1, buildMinimalWavBytes(2, 44100, 16, 200), true);
+    sp404::replacePadSample(source, 'B', 3, buildMinimalWavBytes(1, 44100, 16, 100), true);
+    const auto dest = makeSyntheticCard("sp404_core_test_sync_progress_dst");
+
+    // PAD_INFO.BIN + 2 sample WAVs = 3 files in source's SMPL/.
+    const int expectedTotal = 3;
+
+    std::vector<std::tuple<int, int, std::string>> calls;
+    sp404::syncCard(source, dest, [&](int current, int total, const std::string& label) {
+        calls.emplace_back(current, total, label);
+    });
+
+    REQUIRE(calls.size() == static_cast<size_t>(expectedTotal));
+    for (size_t i = 0; i < calls.size(); ++i) {
+        CHECK(std::get<0>(calls[i]) == static_cast<int>(i) + 1); // 1-based, strictly increasing
+        CHECK(std::get<1>(calls[i]) == expectedTotal);           // total known upfront, never changes
+        CHECK_FALSE(std::get<2>(calls[i]).empty());              // some filename
+    }
 
     std::filesystem::remove_all(source);
     std::filesystem::remove_all(dest);

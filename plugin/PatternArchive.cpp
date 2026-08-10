@@ -225,7 +225,8 @@ LoadPatternResult loadPatternFromZip(const std::filesystem::path& sdRoot, const 
 }
 
 ExportAllPatternsResult exportAllPatternsToMidiZip(const std::filesystem::path& sdRoot,
-                                                    const juce::File& zipDestination) {
+                                                    const juce::File& zipDestination,
+                                                    ProgressCallback onProgress) {
     ExportAllPatternsResult result;
 
     // MIDI files are written here (exportPatternToMidi only knows how to write to a real file,
@@ -237,14 +238,22 @@ ExportAllPatternsResult exportAllPatternsToMidiZip(const std::filesystem::path& 
             .getChildFile("sp404_pattern_export_" + juce::String::toHexString(juce::Random::getSystemRandom().nextInt64()));
     tempDir.createDirectory();
 
+    constexpr int totalSlots = SdCard::numBanks * Bank::padCount;
+    int slotsChecked = 0;
+
     juce::ZipFile::Builder builder;
     for (char bank = 'A'; bank <= 'J'; ++bank) {
         for (int indexInBank = 1; indexInBank <= Bank::padCount; ++indexInBank) {
+            const juce::String entryStem = padEntryStem(bank, indexInBank);
+            ++slotsChecked;
+            if (onProgress)
+                onProgress(slotsChecked, totalSlots, entryStem.toStdString());
+
             const auto pattern = readPattern(patternSlotPath(sdRoot, bank, indexInBank));
             if (!pattern)
                 continue;
 
-            const juce::String entryName = padEntryStem(bank, indexInBank) + ".mid";
+            const juce::String entryName = entryStem + ".mid";
             const juce::File tempFile = tempDir.getChildFile(entryName);
             if (!exportPatternToMidi(*pattern, tempFile))
                 continue;
@@ -264,7 +273,8 @@ ExportAllPatternsResult exportAllPatternsToMidiZip(const std::filesystem::path& 
     return result;
 }
 
-LoadAllPatternsResult loadAllPatternsFromMidiZip(const std::filesystem::path& sdRoot, const juce::File& zipFile) {
+LoadAllPatternsResult loadAllPatternsFromMidiZip(const std::filesystem::path& sdRoot, const juce::File& zipFile,
+                                                  ProgressCallback onProgress) {
     LoadAllPatternsResult result;
     if (!zipFile.existsAsFile())
         return result;
@@ -299,12 +309,19 @@ LoadAllPatternsResult loadAllPatternsFromMidiZip(const std::filesystem::path& sd
             .getChildFile("sp404_pattern_import_" + juce::String::toHexString(juce::Random::getSystemRandom().nextInt64()));
     tempDir.createDirectory();
 
+    const int totalMatches = static_cast<int>(matches.size());
+    int processed = 0;
     for (const auto& match : matches) {
+        ++processed;
+        const juce::String entryStem = padEntryStem(match.bank, match.indexInBank);
+        if (onProgress)
+            onProgress(processed, totalMatches, entryStem.toStdString());
+
         std::unique_ptr<juce::InputStream> entryStream(zip.createStreamForEntry(match.entryIndex));
         if (entryStream == nullptr)
             continue;
 
-        const juce::File tempFile = tempDir.getChildFile(padEntryStem(match.bank, match.indexInBank) + ".mid");
+        const juce::File tempFile = tempDir.getChildFile(entryStem + ".mid");
         {
             std::unique_ptr<juce::FileOutputStream> out = tempFile.createOutputStream();
             if (out == nullptr || !out->writeFromInputStream(*entryStream, -1))

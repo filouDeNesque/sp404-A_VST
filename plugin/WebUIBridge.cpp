@@ -454,6 +454,40 @@ void respondOk(bool ok, juce::WebBrowserComponent::NativeFunctionCompletion comp
     completion(juce::var(response));
 }
 
+// --- Background save/load/sync operations -----------------------------------------------------
+//
+// Save All Banks/Load All Banks/Save This Bank/Load A Bank/Export All Patterns/Load All
+// Patterns/Go Offline (seeding the mirror)/Sync Mirror -> Card all run their actual file work on
+// a background thread via PluginProcessor::backgroundOperation() (see BackgroundOperation.h),
+// instead of blocking the message thread -- and the whole WebView with it -- for however long a
+// multi-hundred-file zip/sync takes. Each gets a "start<Name>" native function that kicks the
+// work off and returns immediately (`{started}`), paired with the one shared
+// "getOperationProgress" below that the UI polls (see wireBackgroundProgressUi in app.js) until
+// `done`, at which point `result` holds whatever that specific operation's start function chose
+// to report (typically `{ok}` or `{ok, someCount}`, matching each operation's non-background
+// response shape from before this).
+
+void respondStarted(bool started, juce::WebBrowserComponent::NativeFunctionCompletion completion) {
+    auto* response = new juce::DynamicObject();
+    response->setProperty("started", started);
+    completion(juce::var(response));
+}
+
+void handleGetOperationProgress(PluginProcessor& processor, const juce::Array<juce::var>&,
+                                 juce::WebBrowserComponent::NativeFunctionCompletion completion) {
+    const auto snapshot = processor.backgroundOperation().poll();
+
+    auto* response = new juce::DynamicObject();
+    response->setProperty("running", snapshot.running);
+    response->setProperty("done", snapshot.done);
+    response->setProperty("current", snapshot.current);
+    response->setProperty("total", snapshot.total);
+    response->setProperty("label", snapshot.label);
+    if (snapshot.done)
+        response->setProperty("result", snapshot.result);
+    completion(juce::var(response));
+}
+
 // Native file dialogs -- the bank-management menu's only use of anything outside the WebView
 // (there's no browser equivalent for a real "Save As" to an arbitrary location, or for picking an
 // existing file by path rather than by drag/drop -- see plan notes). Async (launchAsync), not the
@@ -536,31 +570,55 @@ void handlePickMidiToSave(const juce::Array<juce::var>& args,
         });
 }
 
-// args: [zipPath]
+// args: [zipPath]. Runs in the background -- see handleGetOperationProgress above.
 void handleSaveAllBanks(PluginProcessor& processor, const juce::Array<juce::var>& args,
                         juce::WebBrowserComponent::NativeFunctionCompletion completion) {
-    bool ok = false;
-    if (const auto cardRoot = processor.resolveCardRoot(); cardRoot && args.size() > 0)
-        ok = saveAllBanksToZip(*cardRoot, juce::File(args[0].toString()));
-    respondOk(ok, completion);
+    bool started = false;
+    if (const auto cardRoot = processor.resolveCardRoot(); cardRoot && args.size() > 0) {
+        const auto root = *cardRoot;
+        const juce::File zipPath(args[0].toString());
+        started = processor.backgroundOperation().start([root, zipPath](const ProgressCallback& onProgress) -> juce::var {
+            auto* response = new juce::DynamicObject();
+            response->setProperty("ok", saveAllBanksToZip(root, zipPath, onProgress));
+            return juce::var(response);
+        });
+    }
+    respondStarted(started, completion);
 }
 
-// args: [zipPath]
+// args: [zipPath]. Runs in the background -- see handleGetOperationProgress above.
 void handleLoadAllBanks(PluginProcessor& processor, const juce::Array<juce::var>& args,
                         juce::WebBrowserComponent::NativeFunctionCompletion completion) {
-    bool ok = false;
-    if (const auto cardRoot = processor.resolveCardRoot(); cardRoot && args.size() > 0)
-        ok = loadAllBanksFromZip(*cardRoot, juce::File(args[0].toString()));
-    respondOk(ok, completion);
+    bool started = false;
+    if (const auto cardRoot = processor.resolveCardRoot(); cardRoot && args.size() > 0) {
+        const auto root = *cardRoot;
+        const juce::File zipPath(args[0].toString());
+        started = processor.backgroundOperation().start([root, zipPath](const ProgressCallback& onProgress) -> juce::var {
+            auto* response = new juce::DynamicObject();
+            response->setProperty("ok", loadAllBanksFromZip(root, zipPath, onProgress));
+            return juce::var(response);
+        });
+    }
+    respondStarted(started, completion);
 }
 
-// args: [bankChar, zipPath]
+// args: [bankChar, zipPath]. Runs in the background -- see handleGetOperationProgress above.
 void handleSaveBank(PluginProcessor& processor, const juce::Array<juce::var>& args,
                      juce::WebBrowserComponent::NativeFunctionCompletion completion) {
-    bool ok = false;
-    if (const auto cardRoot = processor.resolveCardRoot(); cardRoot && args.size() > 1 && args[0].toString().length() == 1)
-        ok = saveBankToZip(*cardRoot, static_cast<char>(args[0].toString()[0]), juce::File(args[1].toString()));
-    respondOk(ok, completion);
+    bool started = false;
+    if (const auto cardRoot = processor.resolveCardRoot();
+        cardRoot && args.size() > 1 && args[0].toString().length() == 1) {
+        const auto root = *cardRoot;
+        const char bankChar = static_cast<char>(args[0].toString()[0]);
+        const juce::File zipPath(args[1].toString());
+        started = processor.backgroundOperation().start(
+            [root, bankChar, zipPath](const ProgressCallback& onProgress) -> juce::var {
+                auto* response = new juce::DynamicObject();
+                response->setProperty("ok", saveBankToZip(root, bankChar, zipPath, onProgress));
+                return juce::var(response);
+            });
+    }
+    respondStarted(started, completion);
 }
 
 // args: [zipPath] -- reads a single-bank archive's manifest only, nothing is extracted. Used by
@@ -580,13 +638,24 @@ void handlePeekBankZip(const juce::Array<juce::var>& args,
 }
 
 // args: [zipPath, targetBankChar] -- targetBankChar may differ from the bank the archive was
-// originally saved from (see sp404::loadBankFromZip).
+// originally saved from (see sp404::loadBankFromZip). Runs in the background -- see
+// handleGetOperationProgress above.
 void handleLoadBank(PluginProcessor& processor, const juce::Array<juce::var>& args,
                      juce::WebBrowserComponent::NativeFunctionCompletion completion) {
-    bool ok = false;
-    if (const auto cardRoot = processor.resolveCardRoot(); cardRoot && args.size() > 1 && args[1].toString().length() == 1)
-        ok = loadBankFromZip(*cardRoot, juce::File(args[0].toString()), static_cast<char>(args[1].toString()[0]));
-    respondOk(ok, completion);
+    bool started = false;
+    if (const auto cardRoot = processor.resolveCardRoot();
+        cardRoot && args.size() > 1 && args[1].toString().length() == 1) {
+        const auto root = *cardRoot;
+        const juce::File zipPath(args[0].toString());
+        const char targetBank = static_cast<char>(args[1].toString()[0]);
+        started = processor.backgroundOperation().start(
+            [root, zipPath, targetBank](const ProgressCallback& onProgress) -> juce::var {
+                auto* response = new juce::DynamicObject();
+                response->setProperty("ok", loadBankFromZip(root, zipPath, targetBank, onProgress));
+                return juce::var(response);
+            });
+    }
+    respondStarted(started, completion);
 }
 
 // args: [bankChar, indexInBank, zipPath]
@@ -697,33 +766,45 @@ void handleExportPatternMidi(PluginProcessor& processor, const juce::Array<juce:
 // slot on the card, bundled into one zip, see sp404::exportAllPatternsToMidiZip. Read-only w.r.t.
 // the card, same as the single-pattern version. Response includes exportedCount so the UI can
 // tell "wrote an empty zip, no patterns on the card" apart from "failed to write" (both report
-// ok, only the count differs) -- and show a specific count either way.
+// ok, only the count differs) -- and show a specific count either way. Runs in the background --
+// see handleGetOperationProgress above.
 void handleExportAllPatternsMidi(PluginProcessor& processor, const juce::Array<juce::var>& args,
                                   juce::WebBrowserComponent::NativeFunctionCompletion completion) {
-    ExportAllPatternsResult result;
-    if (const auto cardRoot = processor.resolveCardRoot(); cardRoot && args.size() > 0)
-        result = exportAllPatternsToMidiZip(*cardRoot, juce::File(args[0].toString()));
-
-    auto* response = new juce::DynamicObject();
-    response->setProperty("ok", result.ok);
-    response->setProperty("exportedCount", result.exportedCount);
-    completion(juce::var(response));
+    bool started = false;
+    if (const auto cardRoot = processor.resolveCardRoot(); cardRoot && args.size() > 0) {
+        const auto root = *cardRoot;
+        const juce::File zipPath(args[0].toString());
+        started = processor.backgroundOperation().start([root, zipPath](const ProgressCallback& onProgress) -> juce::var {
+            const auto result = exportAllPatternsToMidiZip(root, zipPath, onProgress);
+            auto* response = new juce::DynamicObject();
+            response->setProperty("ok", result.ok);
+            response->setProperty("exportedCount", result.exportedCount);
+            return juce::var(response);
+        });
+    }
+    respondStarted(started, completion);
 }
 
 // args: [zipPath]. Reverse of handleExportAllPatternsMidi above -- see
 // sp404::loadAllPatternsFromMidiZip. Destructive (clears every existing pattern first, same
 // "clobber and don't merge" rule as every other Load in this app) -- the UI must confirm before
-// calling this. Response includes importedCount for the same reason as the export side.
+// calling this. Response includes importedCount for the same reason as the export side. Runs in
+// the background -- see handleGetOperationProgress above.
 void handleLoadAllPatternsMidi(PluginProcessor& processor, const juce::Array<juce::var>& args,
                                 juce::WebBrowserComponent::NativeFunctionCompletion completion) {
-    LoadAllPatternsResult result;
-    if (const auto cardRoot = processor.resolveCardRoot(); cardRoot && args.size() > 0)
-        result = loadAllPatternsFromMidiZip(*cardRoot, juce::File(args[0].toString()));
-
-    auto* response = new juce::DynamicObject();
-    response->setProperty("ok", result.ok);
-    response->setProperty("importedCount", result.importedCount);
-    completion(juce::var(response));
+    bool started = false;
+    if (const auto cardRoot = processor.resolveCardRoot(); cardRoot && args.size() > 0) {
+        const auto root = *cardRoot;
+        const juce::File zipPath(args[0].toString());
+        started = processor.backgroundOperation().start([root, zipPath](const ProgressCallback& onProgress) -> juce::var {
+            const auto result = loadAllPatternsFromMidiZip(root, zipPath, onProgress);
+            auto* response = new juce::DynamicObject();
+            response->setProperty("ok", result.ok);
+            response->setProperty("importedCount", result.importedCount);
+            return juce::var(response);
+        });
+    }
+    respondStarted(started, completion);
 }
 
 // args: [midiPath, targetBankChar, targetIndexInBank]. Quantizes the MIDI file's notes onto the
@@ -815,26 +896,37 @@ void handleGetSyncMode(PluginProcessor& processor, const juce::Array<juce::var>&
 
 // Seeds the offline mirror from the currently-connected real card if it isn't already seeded,
 // then switches to offline mode. Requires a real card connected right now if the mirror is empty
-// -- there's nothing to mirror otherwise.
+// -- there's nothing to mirror otherwise. Runs in the background -- see
+// handleGetOperationProgress above -- even for the "already seeded" fast path (setOfflineMode is
+// an atomic store either way, safe to call from the background thread; a trivial background op
+// that finishes almost instantly keeps the UI-side contract uniform rather than special-casing
+// this one operation as sometimes not going through start/poll at all).
 void handleEnterOfflineMode(PluginProcessor& processor, const juce::Array<juce::var>&,
                              juce::WebBrowserComponent::NativeFunctionCompletion completion) {
-    bool ok = false;
-    const auto mirror = PluginProcessor::mirrorRoot();
+    PluginProcessor* processorPtr = &processor;
+    const bool started = processor.backgroundOperation().start([processorPtr](const ProgressCallback& onProgress) -> juce::var {
+        bool ok = false;
+        const auto mirror = PluginProcessor::mirrorRoot();
 
-    if (isMirrorSeeded()) {
-        ok = true;
-    } else if (const auto realRoot = findConnectedCardRoot()) {
-        try {
-            syncCard(*realRoot, mirror);
+        if (isMirrorSeeded()) {
             ok = true;
-        } catch (const std::exception&) {
-            ok = false;
+        } else if (const auto realRoot = findConnectedCardRoot()) {
+            try {
+                syncCard(*realRoot, mirror, onProgress);
+                ok = true;
+            } catch (const std::exception&) {
+                ok = false;
+            }
         }
-    }
 
-    if (ok)
-        processor.setOfflineMode(true);
-    respondOk(ok, completion);
+        if (ok)
+            processorPtr->setOfflineMode(true);
+
+        auto* response = new juce::DynamicObject();
+        response->setProperty("ok", ok);
+        return juce::var(response);
+    });
+    respondStarted(started, completion);
 }
 
 void handleExitOfflineMode(PluginProcessor& processor, const juce::Array<juce::var>&,
@@ -844,20 +936,28 @@ void handleExitOfflineMode(PluginProcessor& processor, const juce::Array<juce::v
 }
 
 // Pushes the offline mirror's contents onto the currently-connected real card, overwriting it.
+// Runs in the background -- see handleGetOperationProgress above.
 void handleSyncMirrorToCard(PluginProcessor& processor, const juce::Array<juce::var>&,
                              juce::WebBrowserComponent::NativeFunctionCompletion completion) {
-    bool ok = false;
+    bool started = false;
     if (processor.isOfflineMode()) {
         if (const auto realRoot = findConnectedCardRoot()) {
-            try {
-                syncCard(PluginProcessor::mirrorRoot(), *realRoot);
-                ok = true;
-            } catch (const std::exception&) {
-                ok = false;
-            }
+            const auto dest = *realRoot;
+            started = processor.backgroundOperation().start([dest](const ProgressCallback& onProgress) -> juce::var {
+                bool ok = false;
+                try {
+                    syncCard(PluginProcessor::mirrorRoot(), dest, onProgress);
+                    ok = true;
+                } catch (const std::exception&) {
+                    ok = false;
+                }
+                auto* response = new juce::DynamicObject();
+                response->setProperty("ok", ok);
+                return juce::var(response);
+            });
         }
     }
-    respondOk(ok, completion);
+    respondStarted(started, completion);
 }
 
 // --- Theme preference ---------------------------------------------------------------------
@@ -1203,6 +1303,11 @@ juce::WebBrowserComponent::Options makeWebViewOptions(PluginProcessor& processor
                                  handlePickZipToOpen(completion);
                              })
         .withNativeFunction("pickZipToSave", handlePickZipToSave)
+        .withNativeFunction("getOperationProgress",
+                             [&processor](const juce::Array<juce::var>& args,
+                                          juce::WebBrowserComponent::NativeFunctionCompletion completion) {
+                                 handleGetOperationProgress(processor, args, completion);
+                             })
         .withNativeFunction("saveAllBanksToZip",
                              [&processor](const juce::Array<juce::var>& args,
                                           juce::WebBrowserComponent::NativeFunctionCompletion completion) {

@@ -87,6 +87,17 @@
     </div>
   </div>
 
+  <!-- Shown while a background save/load/sync operation runs (see runBackgroundOperation in
+       app.js) -- no Cancel button, these operations aren't interruptible mid-write. -->
+  <div id="progress-modal" class="modal-overlay hidden">
+    <div class="modal-panel progress-panel">
+      <div id="progress-spinner" class="spinner"></div>
+      <p id="progress-title"></p>
+      <div class="progress-track"><div id="progress-fill" class="progress-fill"></div></div>
+      <p id="progress-detail"></p>
+    </div>
+  </div>
+
   <div id="bank-target-modal" class="modal-overlay hidden">
     <div class="modal-panel">
       <p>Restore into which bank?</p>
