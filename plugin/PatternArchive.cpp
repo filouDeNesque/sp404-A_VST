@@ -264,4 +264,62 @@ ExportAllPatternsResult exportAllPatternsToMidiZip(const std::filesystem::path& 
     return result;
 }
 
+LoadAllPatternsResult loadAllPatternsFromMidiZip(const std::filesystem::path& sdRoot, const juce::File& zipFile) {
+    LoadAllPatternsResult result;
+    if (!zipFile.existsAsFile())
+        return result;
+
+    juce::ZipFile zip(zipFile);
+
+    struct MatchedEntry {
+        int entryIndex;
+        char bank;
+        int indexInBank;
+    };
+    std::vector<MatchedEntry> matches;
+    for (int i = 0; i < zip.getNumEntries(); ++i) {
+        const auto* entry = zip.getEntry(i);
+        char bank = 'A';
+        int indexInBank = 1;
+        juce::String suffix;
+        if (entry != nullptr && parsePadEntryName(entry->filename, bank, indexInBank, suffix) &&
+            suffix.equalsIgnoreCase(".mid"))
+            matches.push_back({i, bank, indexInBank});
+    }
+
+    // Validated BEFORE touching the real card -- an unrelated/empty zip must never wipe existing
+    // patterns for nothing, same principle as BankArchive::loadAllBanksFromZip.
+    if (matches.empty())
+        return result;
+
+    clearAllPatterns(sdRoot);
+
+    const juce::File tempDir =
+        juce::File::getSpecialLocation(juce::File::tempDirectory)
+            .getChildFile("sp404_pattern_import_" + juce::String::toHexString(juce::Random::getSystemRandom().nextInt64()));
+    tempDir.createDirectory();
+
+    for (const auto& match : matches) {
+        std::unique_ptr<juce::InputStream> entryStream(zip.createStreamForEntry(match.entryIndex));
+        if (entryStream == nullptr)
+            continue;
+
+        const juce::File tempFile = tempDir.getChildFile(padEntryStem(match.bank, match.indexInBank) + ".mid");
+        {
+            std::unique_ptr<juce::FileOutputStream> out = tempFile.createOutputStream();
+            if (out == nullptr || !out->writeFromInputStream(*entryStream, -1))
+                continue;
+        }
+
+        if (const auto pattern = importPatternFromMidi(tempFile)) {
+            writePattern(sdRoot, match.bank, match.indexInBank, *pattern);
+            ++result.importedCount;
+        }
+    }
+
+    tempDir.deleteRecursively();
+    result.ok = true;
+    return result;
+}
+
 } // namespace sp404

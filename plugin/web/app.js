@@ -977,6 +977,20 @@
             statusEl.textContent = `Exported ${result.exportedCount} pattern(s) as MIDI to ${picked.path}.`;
           }
         },
+        "load-all-patterns-midi": async () => {
+          const picked = await window.getNativeFunction("pickZipToOpen")();
+          if (picked.cancelled) return;
+          const confirmed = await showConfirm(
+            "This replaces every pattern on the card with the ones in this backup. This cannot be undone. Continue?"
+          );
+          if (!confirmed) return;
+          const result = await window.getNativeFunction("loadAllPatternsMidi")(picked.path);
+          if (!result || !result.ok) {
+            statusEl.textContent = "Not a recognizable \"Export All Patterns\" backup, or failed to read it.";
+          } else {
+            statusEl.textContent = `Restored ${result.importedCount} pattern(s) from ${picked.path}.`;
+          }
+        },
         "open-theme-picker": () => openThemePicker(),
       };
 

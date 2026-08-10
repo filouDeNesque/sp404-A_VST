@@ -71,4 +71,21 @@ struct ExportAllPatternsResult {
 ExportAllPatternsResult exportAllPatternsToMidiZip(const std::filesystem::path& sdRoot,
                                                     const juce::File& zipDestination);
 
+struct LoadAllPatternsResult {
+    bool ok = false;
+    int importedCount = 0;
+};
+
+// Reverse of exportAllPatternsToMidiZip: every "<Bank><2-digit pad>.mid" entry found in the zip
+// (e.g. "A01.mid") is imported back onto its matching slot (see sp404::importPatternFromMidi/
+// writePattern) -- entries that don't match that naming scheme are ignored, not an error, so a
+// zip with extra unrelated files doesn't fail the whole restore. Validated (at least one matching
+// entry found) BEFORE touching the card: if the zip has none, `ok` is false and nothing on the
+// card is touched, same "validate before clobbering" principle as BankArchive::loadAllBanksFromZip.
+// Otherwise every existing pattern is cleared first (sp404::clearAllPatterns, same "clobber and
+// don't merge" rule as every other Load in this app -- a slot missing from this zip ends up
+// empty, not left over from before), then each matched entry is imported. `importedCount` can be
+// lower than the number of matching entries if some fail to parse as MIDI.
+LoadAllPatternsResult loadAllPatternsFromMidiZip(const std::filesystem::path& sdRoot, const juce::File& zipFile);
+
 } // namespace sp404

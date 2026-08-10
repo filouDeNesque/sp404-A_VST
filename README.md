@@ -144,11 +144,19 @@ Les tests couvrent `core/` (parsing `PAD_INFO.BIN` et chunk `RLND`), voir
     zéro), Export All Patterns (MIDI)… (bulk : exporte tous les slots de pattern occupés, sur les
     10 banks, en un seul `.zip` de fichiers `.mid` nommés `<Banque><2 chiffres>.mid`, ex.
     `A01.mid` — voir `sp404::exportAllPatternsToMidiZip`, `plugin/PatternArchive.h`, la version
-    "toutes les banks" du bouton "Export MIDI…" du panneau Patterns décrit plus bas), Delete All
-    Patterns (`sp404::clearAllPatterns`, `core/include/sp404/SdCard.h` — supprime les 120
-    `PTNxxxxx.BIN` possibles, slots déjà vides silencieusement ignorés ; contrepartie destructive
-    d'Export All Patterns, même confirmation modale que Vider tout). Le "Save
-    As"/"Open" passe par un vrai sélecteur de fichier natif
+    "toutes les banks" du bouton "Export MIDI…" du panneau Patterns décrit plus bas), Load All
+    Patterns (MIDI)… (l'inverse : lit un `.zip` produit par Export All Patterns, importe chaque
+    entrée `<Banque><2 chiffres>.mid` reconnue sur son slot d'origine via
+    `sp404::importPatternFromMidi`/`writePattern` — voir `sp404::loadAllPatternsFromMidiZip`.
+    Validé *avant* de toucher la carte : si le zip ne contient aucune entrée reconnaissable,
+    rien n'est effacé et l'opération échoue proprement, comme `loadAllBanksFromZip`. Sinon,
+    **tous** les patterns existants sont d'abord effacés — `sp404::clearAllPatterns` — puis
+    remplacés par le contenu du zip, même logique "remplace entièrement, ne fusionne jamais" que
+    le reste des chargements de cet app ; un slot absent du zip finit donc vide, pas laissé tel
+    quel), Delete All Patterns (`sp404::clearAllPatterns`, `core/include/sp404/SdCard.h` —
+    supprime les 120 `PTNxxxxx.BIN` possibles, slots déjà vides silencieusement ignorés ;
+    contrepartie destructive d'Export All Patterns, même confirmation modale que Vider tout). Le
+    "Save As"/"Open" passe par un vrai sélecteur de fichier natif
     (`juce::FileChooser`, async — seul dialogue natif de l'app, pas d'équivalent web pour un
     Save As vers un emplacement arbitraire) ; toute action destructive (vider, charger qui
     remplace) est confirmée par une modale **dans la WebView** (pas de dialogue système) pour
@@ -497,11 +505,30 @@ docs/     spécification du format de carte SD SP-404SX et ses sources.
     `.zip` (`juce::ZipFile::Builder`, entrées `<Banque><2 chiffres>.mid`). Les `.mid`
     intermédiaires sont écrits dans un dossier temporaire (l'API `exportPatternToMidi` existante
     n'a pas de variante en mémoire) puis supprimés une fois le zip écrit, succès ou échec.
-    Vérifié via un harnais offline jetable **contre la carte réelle reconnectée** : exporte
-    exactement les 3 patterns réels (`A01.mid`/`A09.mid`/`A12.mid`, correspondant aux 3 fichiers
-    `PTN` déjà vérifiés dans `docs/sp404sx-format.md`), zéro faux positif/négatif sur les 117
-    slots vides restants. 66/66 `ctest` (inchangé — logique de bundle simple au-dessus d'une
-    fonction déjà testée, pas de nouveau test dédié), build propre, 3/3 `auval`.
+    Vérifié via un harnais offline jetable **contre la carte réelle reconnectée** : exportait
+    exactement les 3 patterns réels présents à l'époque (`A01.mid`/`A09.mid`/`A12.mid`,
+    correspondant aux 3 fichiers `PTN` déjà vérifiés dans `docs/sp404sx-format.md`), zéro faux
+    positif/négatif sur les slots vides restants. 66/66 `ctest` (inchangé — logique de bundle
+    simple au-dessus d'une fonction déjà testée, pas de nouveau test dédié), build propre, 3/3
+    `auval`.
+  - ✅ **Load MIDI en masse** (2026-08-10, `sp404::loadAllPatternsFromMidiZip`,
+    `plugin/PatternArchive.h`/`.cpp`, menu "Load All Patterns (MIDI)…") : inverse de l'export
+    ci-dessus. Repère chaque entrée du zip nommée `<Banque><2 chiffres>.mid` (réutilise le même
+    analyseur de nom que `loadPatternFromZip`, `parsePadEntryName`), **valide qu'il y en a au
+    moins une avant de toucher quoi que ce soit sur la carte** (même principe que
+    `BankArchive::loadAllBanksFromZip` : un zip non reconnaissable ne doit rien effacer), puis
+    efface tous les patterns existants (`sp404::clearAllPatterns`, ajoutée avec Delete All
+    Patterns ci-dessous) avant d'importer chaque entrée trouvée sur son slot via
+    `importPatternFromMidi`/`writePattern` — "remplace entièrement", pas une fusion, même
+    philosophie que tous les autres "Load" de cette app. Vérifié via un harnais offline jetable
+    **contre la carte réelle reconnectée** (devenue 5 patterns entre-temps, l'utilisateur en
+    ayant ajouté depuis la vérification de l'export ci-dessus) : export→chargement dans une
+    carte synthétique de test avec un pattern-leurre pré-existant sur un slot absent du zip (B5)
+    — les 5 patterns réels restaurés sur leurs bons slots, le leurre bien effacé (confirme le
+    remplacement complet plutôt qu'une fusion), nombre de mesures identique à l'original pour
+    chaque pattern vérifié. 67/67 `ctest` (dont 1 nouveau, `clearAllPatterns` — le reste de la
+    logique bundle/validation n'a pas de nouveau test dédié, même raisonnement que l'export),
+    build propre, 3/3 `auval`.
   - 🟡 Triggering d'un pattern entier depuis le DAW, synchronisé tempo/transport hôte — fait
     partiellement, voir le détail complet ci-dessous.
 

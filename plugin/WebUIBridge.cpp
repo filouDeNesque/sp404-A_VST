@@ -707,6 +707,22 @@ void handleExportAllPatternsMidi(PluginProcessor& processor, const juce::Array<j
     completion(juce::var(response));
 }
 
+// args: [zipPath]. Reverse of handleExportAllPatternsMidi above -- see
+// sp404::loadAllPatternsFromMidiZip. Destructive (clears every existing pattern first, same
+// "clobber and don't merge" rule as every other Load in this app) -- the UI must confirm before
+// calling this. Response includes importedCount for the same reason as the export side.
+void handleLoadAllPatternsMidi(PluginProcessor& processor, const juce::Array<juce::var>& args,
+                                juce::WebBrowserComponent::NativeFunctionCompletion completion) {
+    LoadAllPatternsResult result;
+    if (const auto cardRoot = processor.resolveCardRoot(); cardRoot && args.size() > 0)
+        result = loadAllPatternsFromMidiZip(*cardRoot, juce::File(args[0].toString()));
+
+    auto* response = new juce::DynamicObject();
+    response->setProperty("ok", result.ok);
+    response->setProperty("importedCount", result.importedCount);
+    completion(juce::var(response));
+}
+
 // args: [midiPath, targetBankChar, targetIndexInBank]. Quantizes the MIDI file's notes onto the
 // pattern grid and writes the result to the target slot, overwriting whatever pattern was there
 // -- see sp404::importPatternFromMidi/writePattern.
@@ -1241,6 +1257,11 @@ juce::WebBrowserComponent::Options makeWebViewOptions(PluginProcessor& processor
                              [&processor](const juce::Array<juce::var>& args,
                                           juce::WebBrowserComponent::NativeFunctionCompletion completion) {
                                  handleExportAllPatternsMidi(processor, args, completion);
+                             })
+        .withNativeFunction("loadAllPatternsMidi",
+                             [&processor](const juce::Array<juce::var>& args,
+                                          juce::WebBrowserComponent::NativeFunctionCompletion completion) {
+                                 handleLoadAllPatternsMidi(processor, args, completion);
                              })
         .withNativeFunction("importPatternMidi",
                              [&processor](const juce::Array<juce::var>& args,
