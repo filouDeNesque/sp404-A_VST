@@ -133,6 +133,19 @@ Les tests couvrent `core/` (parsing `PAD_INFO.BIN` et chunk `RLND`), voir
     section Roadmap "Chunk WAV `RLND`" plus bas pour le détail) — un swap logiciel ne devrait
     plus être ignoré/rejeté par un SP-404SX/A réel, sous réserve du test bout-en-bout sur le vrai
     appareil documenté comme non fait ci-dessous.
+    **Point d'attention côté Ableton Live (constaté par l'utilisateur, 2026-08-10)** : glisser un
+    clip audio *warpé* depuis Ableton directement sur un pad semble importer une version déjà
+    étirée au tempo du projet, pas le fichier `.wav` d'origine sur le disque. Ce n'est **pas**
+    un comportement de ce plugin : `swapPadSample`/`importAudioToWav` reçoivent tels quels les
+    octets que le glisser-déposer HTML5 leur donne (voir `wirePadDragDrop` dans `app.js`), sans
+    aucune visibilité sur leur provenance — ce plugin ne fait que ré-échantillonner si le taux
+    diffère de 44100 Hz (voir plus haut), jamais d'étirement temporel à l'import. C'est un
+    comportement documenté d'Ableton Live lui-même : glisser un clip warpé hors de Live exporte
+    le rendu tel qu'il sonne actuellement (warp appliqué), pas le fichier source brut — pour que
+    ce qui est glissé corresponde à ce qui est entendu dans la session. À garder en tête plutôt
+    qu'à corriger : pour importer le fichier `.wav` d'origine non modifié, glisser depuis le
+    Finder plutôt que directement depuis la timeline Ableton (même contournement que pour
+    Splice ci-dessus).
 11. Menu de gestion des banks (icône en haut à gauche, miroir de l'icône carte SD) :
     Sauvegarder/Charger toutes les banks (zippe/restaure `SMPL/` en entier, voir
     `sp404::saveAllBanksToZip`/`loadAllBanksFromZip`, `plugin/BankArchive.h`), Sauvegarder cette
