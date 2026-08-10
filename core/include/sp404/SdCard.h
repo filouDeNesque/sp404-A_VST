@@ -103,14 +103,22 @@ bool copyPatternSlot(const std::filesystem::path& sdRoot, char srcBank, int srcI
 // updates that pad's PAD_INFO.BIN record to match the new file: origSampleStart/End (byte offsets
 // of the new file's "data" chunk, see docs/sp404sx-format.md) and channels/format are recomputed;
 // userSampleStart/End reset to cover the whole new file (no trim yet); tempoMode/origTempo/
-// userTempo reset to Off/0 (no tempo info for a freshly-imported sample). volume/loop/gate/
-// reverse/lofi are preserved from the pad's existing record. If the pad previously had a sample
-// under the other extension (.AIF vs .WAV), that stale file is removed.
+// userTempo reset to Off/0 (no tempo info for a freshly-imported sample). loop/reverse/lofi are
+// always preserved from the pad's existing record. volume/gate are preserved too, *unless*
+// resetPlaybackDefaults is true, in which case they're set to a fixed audible default (100/127,
+// gate on) instead -- pass true for a genuinely new sample landing on a pad (drag & drop import,
+// see plugin/WebUIBridge.cpp's doSwapPadSample), so it starts audible rather than silently
+// inheriting volume=0 from a never-used slot (or whatever a previous, unrelated sample on that
+// pad happened to be set to); pass false when rewriting a pad's *existing* sample in place (the
+// DSP panel's normalize/trim/fade/etc., see plugin/SampleDsp.cpp), where resetting playback
+// settings the user already tuned would be a surprising side effect of an unrelated edit. If the
+// pad previously had a sample under the other extension (.AIF vs .WAV), that stale file is
+// removed.
 // Throws std::invalid_argument if bankName/indexInBank are out of range, or std::runtime_error if
 // wavBytes isn't a valid WAV file (fmt/data chunks) once written -- note the file is still left on
 // disk in that case, there is no rollback.
 void replacePadSample(const std::filesystem::path& sdRoot, char bankName, int indexInBank,
-                       const std::vector<std::byte>& wavBytes);
+                       const std::vector<std::byte>& wavBytes, bool resetPlaybackDefaults);
 
 // Deletes a pad's sample file(s) (.WAV and/or .AIF, whichever exist) and resets its PAD_INFO.BIN
 // record to all-zero bytes. Note "has a sample" is determined by SdCard::load()/findSampleFile()

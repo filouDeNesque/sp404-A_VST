@@ -366,7 +366,10 @@ bool doSwapPadSample(PluginProcessor& processor, const std::filesystem::path& ca
 
     bool ok = false;
     try {
-        replacePadSample(cardRoot, bankChar, indexInBank, *decoded);
+        // true: a genuinely new sample landing on this pad -- see replacePadSample's doc comment
+        // on why that resets volume/gate to a fixed audible default (100/gate on) rather than
+        // preserving whatever a previous, unrelated sample on this pad happened to have.
+        replacePadSample(cardRoot, bankChar, indexInBank, *decoded, true);
         ok = true;
     } catch (const std::exception&) {
         ok = false;

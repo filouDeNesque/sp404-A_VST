@@ -187,7 +187,7 @@ bool copyPatternSlot(const std::filesystem::path& sdRoot, char srcBank, int srcI
 }
 
 void replacePadSample(const std::filesystem::path& sdRoot, char bankName, int indexInBank,
-                       const std::vector<std::byte>& wavBytes) {
+                       const std::vector<std::byte>& wavBytes, bool resetPlaybackDefaults) {
     checkPadRange(bankName, indexInBank, "replacePadSample");
 
     const auto wavPath = samplePath(sdRoot, bankName, indexInBank, PadInfo::Format::Wave);
@@ -229,8 +229,18 @@ void replacePadSample(const std::filesystem::path& sdRoot, char bankName, int in
     padInfoFile.close();
 
     PadInfo updated = PadInfo::decode(existingBytes.data(), existingBytes.size());
-    // volume/loop/gate/reverse/lofi describe how to play the pad, independent of which sample
-    // currently occupies it -- preserved as-is. Everything else is derived from the new file.
+    // loop/reverse/lofi describe how to play the pad, independent of which sample currently
+    // occupies it -- always preserved. volume/gate are also preserved *unless*
+    // resetPlaybackDefaults asks for a sane audible default instead (100/127, gate on) -- see
+    // this function's doc comment in SdCard.h for why callers need to choose explicitly rather
+    // than getting one fixed behavior: a genuinely new sample dragged onto a pad should start
+    // audible rather than silently inheriting volume=0 from a never-used slot, but a DSP tool
+    // (normalize/trim/fade/...) rewriting a pad's *existing* sample must never surprise the user
+    // by resetting playback settings they already tuned.
+    if (resetPlaybackDefaults) {
+        updated.volume = 100;
+        updated.gate = true;
+    }
     updated.format = PadInfo::Format::Wave;
     updated.channels = static_cast<uint8_t>(wavInfo->channels);
     updated.origSampleStart = wavInfo->dataOffset;

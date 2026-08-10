@@ -105,9 +105,18 @@ Les tests couvrent `core/` (parsing `PAD_INFO.BIN` et chunk `RLND`), voir
     (voir `sp404::importAudioToWav`, `plugin/SampleImport.h`) avant d'être écrit via
     `sp404::replacePadSample`. Le décodage mp3/mp4/m4a passe par `CoreAudioFormat` (AudioToolbox,
     macOS uniquement) ; flac/wav/aiff sont décodés nativement par JUCE — aucune dépendance
-    supplémentaire. Les réglages du pad (volume/loop/gate/reverse/lofi) sont conservés, seuls les
-    champs dérivés du fichier (offsets, channels, tempo) sont recalculés. Écriture immédiate,
-    comme les autres éditions de pad — pas de bouton "Sauver", pas d'undo. Deux chemins côté UI
+    supplémentaire. **Volume et gate repartent systématiquement à 100/activé** (2026-08-10, sur
+    demande explicite) — y compris en remplaçant un pad déjà configuré, pas seulement un pad
+    vide : un import est censé partir d'un point de départ audible et prévisible, plutôt
+    qu'hériter du volume=0 par défaut d'un slot jamais utilisé (silencieux jusqu'à réglage manuel
+    — c'était le bug signalé) ou des réglages d'un ancien sample sans rapport. loop/reverse/lofi
+    restent conservés. `sp404::replacePadSample` prend désormais un paramètre explicite
+    `resetPlaybackDefaults` pour ça (`true` ici, dans `doSwapPadSample`) — **délibérément pas**
+    la même valeur pour le panneau DSP (voir item 13 plus bas), où repartir à 100/gate activé à
+    chaque Normalize/Trim/Fade serait une surprise plutôt qu'un service : c'est le même sample,
+    juste retouché, pas un nouvel import. Champs dérivés du fichier (offsets, channels, tempo)
+    toujours recalculés. Écriture immédiate, comme les autres éditions de pad — pas de bouton
+    "Sauver", pas d'undo. Deux chemins côté UI
     (voir `wirePadDragDrop`/`extractDroppedFilePath` dans `app.js`) selon ce que la source du
     drag expose réellement :
     - Un vrai fichier OS (typiquement un drag depuis le Finder) : lu en JS
@@ -199,9 +208,13 @@ Les tests couvrent `core/` (parsing `PAD_INFO.BIN` et chunk `RLND`), voir
     deux sens). Le badge `LIVE`/`OFFLINE` en haut à gauche reflète l'état courant.
 13. Panneau DSP par pad (bouton "DSP…" dans les contrôles de chaque pad) — chaque action lit
     l'échantillon **actuel** du pad, le transforme, et le réimporte via
-    `sp404::replacePadSample` (voir `plugin/SampleDsp.h`) : donc, comme un swap par
-    drag & drop, le trim utilisateur du pad se réinitialise sur le résultat, mais
-    volume/loop/gate/reverse/lofi sont conservés. Écriture immédiate, sans undo. Une ligne de
+    `sp404::replacePadSample(..., resetPlaybackDefaults=false)` (voir `plugin/SampleDsp.h`) :
+    donc le trim utilisateur du pad se réinitialise sur le résultat (nouveau fichier, nouvelles
+    bornes), mais **contrairement à un import par glisser-déposer** (item 10 plus haut, qui lui
+    réinitialise volume/gate depuis 2026-08-10), volume/loop/gate/reverse/lofi sont ici toujours
+    conservés — une action DSP retouche le sample déjà en place, ce n'est pas un nouvel import,
+    et réinitialiser le volume à chaque Normalize/Trim/Fade serait une surprise plutôt qu'un
+    service. Écriture immédiate, sans undo. Une ligne de
     statut en haut du panneau (`sp404::getPadDspStatus`, lecture seule) affiche en permanence
     l'état réel du pad — canaux (mono/stéréo), niveau de crête en dBFS, silence de bord restant —
     rafraîchie à l'ouverture et après chaque action, pour que le retour visuel distingue "rien à

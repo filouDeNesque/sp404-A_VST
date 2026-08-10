@@ -235,14 +235,18 @@ TEST_CASE("copyPatternSlot rejects an out-of-range bank or pad index", "[SdCard]
     std::filesystem::remove_all(root);
 }
 
-TEST_CASE("replacePadSample writes the WAV file and updates PAD_INFO.BIN", "[SdCard]") {
+TEST_CASE("replacePadSample(resetPlaybackDefaults=true) writes the WAV file, updates PAD_INFO.BIN, "
+          "and resets volume/gate",
+          "[SdCard]") {
     const auto root = makeSyntheticCard();
 
-    // Pre-existing playback settings for this pad -- should survive the swap untouched.
+    // Pre-existing playback settings for this pad. volume/gate are deliberately set to values
+    // *other* than the post-import defaults (100/true) below, so the test actually exercises the
+    // reset rather than coincidentally matching it either way.
     sp404::PadInfo before;
     before.volume = 90;
     before.loop = true;
-    before.gate = true;
+    before.gate = false;
     before.reverse = true;
     before.lofi = true;
     before.origSampleStart = 999; // stale values from a previous, different sample
@@ -253,7 +257,7 @@ TEST_CASE("replacePadSample writes the WAV file and updates PAD_INFO.BIN", "[SdC
     sp404::savePadInfo(root, 'C', 5, before);
 
     const auto wavBytes = buildMinimalWavBytes(2, 44100, 16, 400);
-    sp404::replacePadSample(root, 'C', 5, wavBytes);
+    sp404::replacePadSample(root, 'C', 5, wavBytes, true);
 
     const auto wavPath = sp404::samplePath(root, 'C', 5, sp404::PadInfo::Format::Wave);
     REQUIRE(std::filesystem::exists(wavPath));
@@ -262,10 +266,12 @@ TEST_CASE("replacePadSample writes the WAV file and updates PAD_INFO.BIN", "[SdC
     const auto card = sp404::SdCard::load(root);
     const auto& pad = card.banks()[2].pads[4].info; // bank C = index 2, pad 5 = index 4
 
-    // Preserved playback settings.
-    CHECK(pad.volume == 90);
-    CHECK(pad.loop == true);
+    // Reset to a fixed audible default on every import, regardless of what was there before.
+    CHECK(pad.volume == 100);
     CHECK(pad.gate == true);
+
+    // Preserved playback settings.
+    CHECK(pad.loop == true);
     CHECK(pad.reverse == true);
     CHECK(pad.lofi == true);
 
@@ -287,6 +293,26 @@ TEST_CASE("replacePadSample writes the WAV file and updates PAD_INFO.BIN", "[SdC
     std::filesystem::remove_all(root);
 }
 
+TEST_CASE("replacePadSample(resetPlaybackDefaults=false) preserves volume/gate", "[SdCard]") {
+    const auto root = makeSyntheticCard();
+
+    // Used by the DSP panel (normalize/trim/fade/...) to rewrite a pad's *existing* sample in
+    // place -- must never reset playback settings the user already tuned for this pad.
+    sp404::PadInfo before;
+    before.volume = 90;
+    before.gate = false;
+    sp404::savePadInfo(root, 'D', 2, before);
+
+    sp404::replacePadSample(root, 'D', 2, buildMinimalWavBytes(2, 44100, 16, 100), false);
+
+    const auto card = sp404::SdCard::load(root);
+    const auto& pad = card.banks()[3].pads[1].info; // bank D = index 3, pad 2 = index 1
+    CHECK(pad.volume == 90);
+    CHECK(pad.gate == false);
+
+    std::filesystem::remove_all(root);
+}
+
 TEST_CASE("replacePadSample removes a stale sample file in the other extension", "[SdCard]") {
     const auto root = makeSyntheticCard();
 
@@ -297,7 +323,7 @@ TEST_CASE("replacePadSample removes a stale sample file in the other extension",
     }
     REQUIRE(std::filesystem::exists(aifPath));
 
-    sp404::replacePadSample(root, 'A', 1, buildMinimalWavBytes(1, 44100, 16, 100));
+    sp404::replacePadSample(root, 'A', 1, buildMinimalWavBytes(1, 44100, 16, 100), true);
 
     CHECK_FALSE(std::filesystem::exists(aifPath));
     CHECK(std::filesystem::exists(sp404::samplePath(root, 'A', 1, sp404::PadInfo::Format::Wave)));
@@ -309,9 +335,9 @@ TEST_CASE("replacePadSample rejects an out-of-range bank or pad index", "[SdCard
     const auto root = makeSyntheticCard();
     const auto wavBytes = buildMinimalWavBytes(1, 44100, 16, 100);
 
-    CHECK_THROWS_AS(sp404::replacePadSample(root, 'Z', 1, wavBytes), std::invalid_argument);
-    CHECK_THROWS_AS(sp404::replacePadSample(root, 'A', 0, wavBytes), std::invalid_argument);
-    CHECK_THROWS_AS(sp404::replacePadSample(root, 'A', 13, wavBytes), std::invalid_argument);
+    CHECK_THROWS_AS(sp404::replacePadSample(root, 'Z', 1, wavBytes, true), std::invalid_argument);
+    CHECK_THROWS_AS(sp404::replacePadSample(root, 'A', 0, wavBytes, true), std::invalid_argument);
+    CHECK_THROWS_AS(sp404::replacePadSample(root, 'A', 13, wavBytes, true), std::invalid_argument);
 
     std::filesystem::remove_all(root);
 }
@@ -320,14 +346,14 @@ TEST_CASE("replacePadSample rejects data that isn't a valid WAV file", "[SdCard]
     const auto root = makeSyntheticCard();
     const std::vector<std::byte> garbage{std::byte{'N'}, std::byte{'O'}, std::byte{'P'}, std::byte{'E'}};
 
-    CHECK_THROWS_AS(sp404::replacePadSample(root, 'A', 1, garbage), std::runtime_error);
+    CHECK_THROWS_AS(sp404::replacePadSample(root, 'A', 1, garbage, true), std::runtime_error);
 
     std::filesystem::remove_all(root);
 }
 
 TEST_CASE("clearPad deletes the sample file and zeroes the PadInfo record", "[SdCard]") {
     const auto root = makeSyntheticCard();
-    sp404::replacePadSample(root, 'D', 3, buildMinimalWavBytes(2, 44100, 16, 200));
+    sp404::replacePadSample(root, 'D', 3, buildMinimalWavBytes(2, 44100, 16, 200), true);
     const auto wavPath = sp404::samplePath(root, 'D', 3, sp404::PadInfo::Format::Wave);
     REQUIRE(std::filesystem::exists(wavPath));
 
@@ -357,8 +383,8 @@ TEST_CASE("clearPad rejects an out-of-range bank or pad index", "[SdCard]") {
 TEST_CASE("clearBank clears every pad in a bank and leaves other banks untouched", "[SdCard]") {
     const auto root = makeSyntheticCard();
     for (int i = 1; i <= 12; ++i)
-        sp404::replacePadSample(root, 'B', i, buildMinimalWavBytes(1, 44100, 16, 100));
-    sp404::replacePadSample(root, 'C', 1, buildMinimalWavBytes(1, 44100, 16, 100));
+        sp404::replacePadSample(root, 'B', i, buildMinimalWavBytes(1, 44100, 16, 100), true);
+    sp404::replacePadSample(root, 'C', 1, buildMinimalWavBytes(1, 44100, 16, 100), true);
 
     sp404::clearBank(root, 'B');
 
@@ -372,8 +398,8 @@ TEST_CASE("clearBank clears every pad in a bank and leaves other banks untouched
 
 TEST_CASE("clearAllBanks clears every pad on the card", "[SdCard]") {
     const auto root = makeSyntheticCard();
-    sp404::replacePadSample(root, 'A', 1, buildMinimalWavBytes(1, 44100, 16, 100));
-    sp404::replacePadSample(root, 'J', 12, buildMinimalWavBytes(1, 44100, 16, 100));
+    sp404::replacePadSample(root, 'A', 1, buildMinimalWavBytes(1, 44100, 16, 100), true);
+    sp404::replacePadSample(root, 'J', 12, buildMinimalWavBytes(1, 44100, 16, 100), true);
 
     sp404::clearAllBanks(root);
 
@@ -387,14 +413,14 @@ TEST_CASE("clearAllBanks clears every pad on the card", "[SdCard]") {
 
 TEST_CASE("syncCard copies source's SMPL/ contents onto destination, replacing what was there", "[SdCard]") {
     const auto source = makeSyntheticCard("sp404_core_test_sync_src");
-    sp404::replacePadSample(source, 'A', 1, buildMinimalWavBytes(2, 44100, 16, 200));
+    sp404::replacePadSample(source, 'A', 1, buildMinimalWavBytes(2, 44100, 16, 200), true);
     sp404::PadInfo infoA1;
     infoA1.volume = 55;
     infoA1.loop = true;
     sp404::savePadInfo(source, 'A', 1, infoA1);
 
     const auto dest = makeSyntheticCard("sp404_core_test_sync_dst");
-    sp404::replacePadSample(dest, 'C', 1, buildMinimalWavBytes(1, 44100, 16, 50)); // must be wiped
+    sp404::replacePadSample(dest, 'C', 1, buildMinimalWavBytes(1, 44100, 16, 50), true); // must be wiped
 
     sp404::syncCard(source, dest);
 
@@ -414,7 +440,7 @@ TEST_CASE("syncCard rejects a source without a valid PAD_INFO.BIN and leaves des
     std::filesystem::create_directories(sp404::smplDir(source)); // no PAD_INFO.BIN written
 
     const auto dest = makeSyntheticCard("sp404_core_test_sync_dst2");
-    sp404::replacePadSample(dest, 'C', 1, buildMinimalWavBytes(1, 44100, 16, 50));
+    sp404::replacePadSample(dest, 'C', 1, buildMinimalWavBytes(1, 44100, 16, 50), true);
 
     CHECK_THROWS_AS(sp404::syncCard(source, dest), std::runtime_error);
 

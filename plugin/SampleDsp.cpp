@@ -60,7 +60,10 @@ bool writePadBuffer(const std::filesystem::path& sdRoot, char bank, int indexInB
     if (!wavBytes)
         return false;
     try {
-        replacePadSample(sdRoot, bank, indexInBank, *wavBytes);
+        // false: rewriting this pad's *existing* sample in place (normalize/trim/fade/...), not
+        // importing a new one -- must never reset volume/gate the user already tuned, see
+        // replacePadSample's doc comment.
+        replacePadSample(sdRoot, bank, indexInBank, *wavBytes, false);
         return true;
     } catch (const std::exception&) {
         return false;
