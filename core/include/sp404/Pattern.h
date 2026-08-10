@@ -47,7 +47,24 @@ struct PatternEvent {
 
     // data must point at exactly encodedSize bytes.
     static PatternEvent decode(const std::byte* data, size_t size);
+    // out must point at exactly encodedSize bytes.
+    void encode(std::byte* out, size_t size) const;
 };
+
+// Builds a real (non-placeholder) PatternEvent that plays bank/padIndexInBank -- the inverse of
+// PatternEvent::bank()/padIndexInBank()/sampleIndex0to119(). Always encodes bankSwitch using the
+// "0 or 1" spelling (not "64/65") since real hardware writes both depending on firmware/
+// interaction and both read back identically (see docs/sp404sx-format.md) -- this project's own
+// writer just needs to pick one. unknown/pitchMode are set to the constant values seen on every
+// real, non-step-sequencer event so far (64 and 0 respectively). Throws std::invalid_argument if
+// bank/padIndexInBank are out of range.
+PatternEvent makeNoteEvent(char bank, int padIndexInBank, uint8_t ticksSincePrevious, uint8_t velocity,
+                            uint16_t lengthTicks);
+
+// A placeholder/rest event (midiNote 128) advancing ticksSincePrevious with no pad triggered --
+// see PatternEvent::isPlaceholder(). Matches the exact all-zero-except-ticks-and-midiNote shape
+// seen on every real placeholder event.
+PatternEvent makePlaceholderEvent(uint8_t ticksSincePrevious);
 
 struct Pattern {
     std::vector<PatternEvent> events;
@@ -69,5 +86,16 @@ std::vector<int> absoluteEventTicks(const Pattern& pattern);
 // Returns std::nullopt if patternPath isn't readable, is shorter than the 16-byte footer, or its
 // size isn't footer + a whole number of PatternEvent::encodedSize-byte records.
 std::optional<Pattern> readPattern(const std::filesystem::path& patternPath);
+
+// Encodes a Pattern back to raw PTNxxxxx.BIN bytes: every event's encodedSize bytes in order,
+// followed by the 16-byte footer. Footer bytes not otherwise carrying information (0, 1, 2-7,
+// 10-11, 13-15) are set to the constant values observed on every real pattern checked so far
+// (byte 1 = 140) or left at 0 -- see docs/sp404sx-format.md's footer table. Round-trips exactly
+// with readPattern() for every real pattern this was verified against.
+std::vector<std::byte> encode(const Pattern& pattern);
+
+// Writes a Pattern to a pattern slot's file on disk (see sp404::patternSlotPath), overwriting
+// whatever was there. Throws std::invalid_argument if bankName/indexInBank are out of range.
+void writePattern(const std::filesystem::path& sdRoot, char bankName, int indexInBank, const Pattern& pattern);
 
 } // namespace sp404

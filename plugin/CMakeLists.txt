@@ -67,6 +67,7 @@ target_sources(SP404Companion PRIVATE
     SampleImport.cpp
     BankArchive.cpp
     PatternArchive.cpp
+    PatternMidi.cpp
     SampleDsp.cpp
     "${rubberband_SOURCE_DIR}/single/RubberBandSingle.cpp"
 )

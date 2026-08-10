@@ -1119,6 +1119,7 @@
             ? `<button type="button" class="pattern-btn" data-action="save-pattern">Save…</button>
                <button type="button" class="pattern-btn" data-action="copy-pattern">Copy…</button>
                <button type="button" class="pattern-btn" data-action="move-pattern">Move…</button>
+               <button type="button" class="pattern-btn" data-action="export-midi">Export MIDI…</button>
                <button type="button" class="pattern-btn danger" data-action="delete-pattern">Delete</button>`
             : "";
           const timeline = slot.exists ? renderPatternTimeline(slot) : "";
@@ -1129,6 +1130,7 @@
             <span class="pattern-actions">
               ${existingActions}
               <button type="button" class="pattern-btn" data-action="load-pattern">Load…</button>
+              <button type="button" class="pattern-btn" data-action="import-midi">Import MIDI…</button>
             </span>
           </div>`;
         })
@@ -1273,6 +1275,29 @@
           if (!confirmed) return;
           const result = await window.getNativeFunction("deletePattern")(bank, indexInBank);
           statusEl.textContent = result && result.ok ? `Deleted pattern ${bank}${indexInBank}.` : `Failed to delete pattern ${bank}${indexInBank}.`;
+          if (result && result.ok) refreshPatternsList();
+        } else if (action === "export-midi") {
+          const picked = await window.getNativeFunction("pickMidiToSave")(`SP404_Pattern_${bank}${indexInBank}.mid`);
+          if (picked.cancelled) return;
+          const result = await window.getNativeFunction("exportPatternMidi")(bank, indexInBank, picked.path);
+          statusEl.textContent =
+            result && result.ok ? `Exported pattern ${bank}${indexInBank} to ${picked.path}.` : `Failed to export pattern ${bank}${indexInBank}.`;
+        } else if (action === "import-midi") {
+          const picked = await window.getNativeFunction("pickMidiToOpen")();
+          if (picked.cancelled) return;
+
+          const targetOccupied = patternsPanelData.some((s) => s.indexInBank === indexInBank && s.exists);
+          const confirmMessage = targetOccupied
+            ? `This replaces pattern ${bank}${indexInBank} with the notes from this MIDI file, quantized onto the pattern grid. This cannot be undone. Continue?`
+            : `This writes the notes from this MIDI file into pattern ${bank}${indexInBank}, quantized onto the pattern grid. Continue?`;
+          const confirmed = await showConfirm(confirmMessage);
+          if (!confirmed) return;
+
+          const result = await window.getNativeFunction("importPatternMidi")(picked.path, bank, indexInBank);
+          statusEl.textContent =
+            result && result.ok
+              ? `Pattern ${bank}${indexInBank} imported from MIDI.`
+              : `Failed to import MIDI into pattern ${bank}${indexInBank} (no notes on a recognized channel/note?).`;
           if (result && result.ok) refreshPatternsList();
         }
       });

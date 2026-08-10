@@ -1,3 +1,5 @@
+#include <algorithm>
+#include <array>
 #include <cstddef>
 #include <filesystem>
 #include <fstream>
@@ -6,6 +8,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include "sp404/Pattern.h"
+#include "sp404/SdCard.h"
 
 namespace {
 
@@ -271,4 +274,121 @@ TEST_CASE("PatternEvent::bank/padIndexInBank cover both bankSwitch spellings and
     outOfRange.midiNote = 200;
     outOfRange.bankSwitch = 0;
     CHECK_FALSE(outOfRange.bank().has_value());
+}
+
+TEST_CASE("PatternEvent::encode round-trips through decode", "[Pattern]") {
+    sp404::PatternEvent event;
+    event.ticksSincePrevious = 200;
+    event.midiNote = 88;
+    event.bankSwitch = 65;
+    event.pitchMode = 0;
+    event.velocity = 100;
+    event.unknown = 64;
+    event.lengthTicks = 12345;
+
+    std::array<std::byte, sp404::PatternEvent::encodedSize> bytes{};
+    event.encode(bytes.data(), bytes.size());
+    const auto decoded = sp404::PatternEvent::decode(bytes.data(), bytes.size());
+
+    CHECK(decoded.ticksSincePrevious == event.ticksSincePrevious);
+    CHECK(decoded.midiNote == event.midiNote);
+    CHECK(decoded.bankSwitch == event.bankSwitch);
+    CHECK(decoded.pitchMode == event.pitchMode);
+    CHECK(decoded.velocity == event.velocity);
+    CHECK(decoded.unknown == event.unknown);
+    CHECK(decoded.lengthTicks == event.lengthTicks);
+}
+
+TEST_CASE("encode(Pattern) reproduces the real bank-C fixture byte-for-byte", "[Pattern]") {
+    const auto path = writeFixture("sp404_core_test_ptn_bank_c_encode.bin", kPtnRealBankC);
+    const auto pattern = sp404::readPattern(path);
+    REQUIRE(pattern.has_value());
+
+    const auto reencoded = sp404::encode(*pattern);
+    REQUIRE(reencoded.size() == kPtnRealBankC.size());
+
+    std::vector<unsigned char> reencodedUnsigned(reencoded.size());
+    std::transform(reencoded.begin(), reencoded.end(), reencodedUnsigned.begin(),
+                    [](std::byte b) { return static_cast<unsigned char>(b); });
+    CHECK(reencodedUnsigned == kPtnRealBankC);
+
+    std::filesystem::remove(path);
+}
+
+TEST_CASE("makeNoteEvent matches real hardware's encoding at both ends of the pad range", "[Pattern]") {
+    // A1 (see docs/sp404sx-format.md): MidiNote=47, BankSwitch=0.
+    const auto a1 = sp404::makeNoteEvent('A', 1, 10, 127, 500);
+    CHECK(a1.midiNote == 47);
+    CHECK(a1.bankSwitch == 0);
+    CHECK(a1.unknown == 64);
+    CHECK(a1.pitchMode == 0);
+    CHECK(a1.ticksSincePrevious == 10);
+    CHECK(a1.velocity == 127);
+    CHECK(a1.lengthTicks == 500);
+    REQUIRE(a1.bank().has_value());
+    CHECK(*a1.bank() == 'A');
+    CHECK(*a1.padIndexInBank() == 1);
+
+    // J12: MidiNote=106, BankSwitch=1 (the "1" spelling -- see makeNoteEvent's doc comment).
+    const auto j12 = sp404::makeNoteEvent('J', 12, 0, 1, 0);
+    CHECK(j12.midiNote == 106);
+    CHECK(j12.bankSwitch == 1);
+    REQUIRE(j12.bank().has_value());
+    CHECK(*j12.bank() == 'J');
+    CHECK(*j12.padIndexInBank() == 12);
+
+    // Round-trip every real pad through makeNoteEvent -> bank()/padIndexInBank().
+    for (char bank = 'A'; bank <= 'J'; ++bank) {
+        for (int pad = 1; pad <= 12; ++pad) {
+            const auto event = sp404::makeNoteEvent(bank, pad, 5, 100, 50);
+            REQUIRE(event.bank().has_value());
+            REQUIRE(event.padIndexInBank().has_value());
+            CHECK(*event.bank() == bank);
+            CHECK(*event.padIndexInBank() == pad);
+        }
+    }
+
+    CHECK_THROWS_AS(sp404::makeNoteEvent('Z', 1, 0, 0, 0), std::invalid_argument);
+    CHECK_THROWS_AS(sp404::makeNoteEvent('A', 13, 0, 0, 0), std::invalid_argument);
+}
+
+TEST_CASE("makePlaceholderEvent matches the real placeholder shape", "[Pattern]") {
+    const auto placeholder = sp404::makePlaceholderEvent(200);
+    CHECK(placeholder.isPlaceholder());
+    CHECK(placeholder.ticksSincePrevious == 200);
+    CHECK(placeholder.midiNote == 128);
+    CHECK(placeholder.bankSwitch == 0);
+    CHECK(placeholder.pitchMode == 0);
+    CHECK(placeholder.velocity == 0);
+    CHECK(placeholder.unknown == 0);
+    CHECK(placeholder.lengthTicks == 0);
+}
+
+TEST_CASE("writePattern writes bytes readPattern can read back", "[Pattern]") {
+    const auto root = std::filesystem::temp_directory_path() / "sp404_core_test_write_pattern";
+    std::filesystem::remove_all(root);
+
+    sp404::Pattern pattern;
+    pattern.events.push_back(sp404::makeNoteEvent('B', 3, 0, 110, 200));
+    pattern.events.push_back(sp404::makeNoteEvent('B', 5, 96, 90, 150));
+    pattern.events.push_back(sp404::makePlaceholderEvent(238));
+    pattern.bars = 1;
+    pattern.timeSignature = 0;
+
+    sp404::writePattern(root, 'A', 4, pattern);
+
+    const auto readBack = sp404::readPattern(sp404::patternSlotPath(root, 'A', 4));
+    REQUIRE(readBack.has_value());
+    CHECK(readBack->bars == 1);
+    CHECK(readBack->events.size() == 3);
+    REQUIRE(readBack->events[0].bank().has_value());
+    CHECK(*readBack->events[0].bank() == 'B');
+    CHECK(*readBack->events[0].padIndexInBank() == 3);
+    REQUIRE(readBack->events[1].bank().has_value());
+    CHECK(*readBack->events[1].padIndexInBank() == 5);
+    CHECK(readBack->events[2].isPlaceholder());
+
+    CHECK_THROWS_AS(sp404::writePattern(root, 'Z', 1, pattern), std::invalid_argument);
+
+    std::filesystem::remove_all(root);
 }

@@ -10,6 +10,7 @@
 #include "BankArchive.h"
 #include "BinaryData.h"
 #include "PatternArchive.h"
+#include "PatternMidi.h"
 #include "PluginProcessor.h"
 #include "SampleDsp.h"
 #include "SampleImport.h"
@@ -481,6 +482,45 @@ void handlePickZipToSave(const juce::Array<juce::var>& args,
         });
 }
 
+// Same pattern as handlePickZipToOpen/handlePickZipToSave above, for Standard MIDI Files instead
+// of .zip archives -- see sp404::exportPatternToMidi/importPatternFromMidi.
+void handlePickMidiToOpen(juce::WebBrowserComponent::NativeFunctionCompletion completion) {
+    auto chooser = std::make_shared<juce::FileChooser>("Choose a MIDI file", juce::File(), "*.mid;*.midi");
+    chooser->launchAsync(juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles,
+                          [chooser, completion](const juce::FileChooser& fc) {
+                              const auto path = fc.getResult().getFullPathName();
+                              auto* response = new juce::DynamicObject();
+                              if (path.isNotEmpty())
+                                  response->setProperty("path", path);
+                              else
+                                  response->setProperty("cancelled", true);
+                              completion(juce::var(response));
+                          });
+}
+
+// args: [defaultFileName]
+void handlePickMidiToSave(const juce::Array<juce::var>& args,
+                           juce::WebBrowserComponent::NativeFunctionCompletion completion) {
+    const juce::String defaultName = args.size() > 0 ? args[0].toString() : juce::String("pattern.mid");
+    const auto defaultFile = juce::File::getSpecialLocation(juce::File::userDocumentsDirectory).getChildFile(defaultName);
+
+    auto chooser = std::make_shared<juce::FileChooser>("Export pattern as MIDI", defaultFile, "*.mid");
+    chooser->launchAsync(
+        juce::FileBrowserComponent::saveMode | juce::FileBrowserComponent::warnAboutOverwriting,
+        [chooser, completion](const juce::FileChooser& fc) {
+            auto path = fc.getResult().getFullPathName();
+            auto* response = new juce::DynamicObject();
+            if (path.isNotEmpty()) {
+                if (!path.endsWithIgnoreCase(".mid") && !path.endsWithIgnoreCase(".midi"))
+                    path += ".mid";
+                response->setProperty("path", path);
+            } else {
+                response->setProperty("cancelled", true);
+            }
+            completion(juce::var(response));
+        });
+}
+
 // args: [zipPath]
 void handleSaveAllBanks(PluginProcessor& processor, const juce::Array<juce::var>& args,
                         juce::WebBrowserComponent::NativeFunctionCompletion completion) {
@@ -613,6 +653,46 @@ void handleCopyPattern(PluginProcessor& processor, const juce::Array<juce::var>&
         try {
             ok = copyPatternSlot(*cardRoot, static_cast<char>(args[0].toString()[0]), static_cast<int>(args[1]),
                                   static_cast<char>(args[2].toString()[0]), static_cast<int>(args[3]));
+        } catch (const std::exception&) {
+            ok = false;
+        }
+    }
+    respondOk(ok, completion);
+}
+
+// args: [bankChar, indexInBank, midiPath]. Read-only w.r.t. the card -- just reads the pattern
+// slot and writes a Standard MIDI File, see sp404::exportPatternToMidi.
+void handleExportPatternMidi(PluginProcessor& processor, const juce::Array<juce::var>& args,
+                              juce::WebBrowserComponent::NativeFunctionCompletion completion) {
+    bool ok = false;
+    if (const auto cardRoot = processor.resolveCardRoot(); cardRoot && args.size() > 2 && args[0].toString().length() == 1) {
+        const char bankChar = static_cast<char>(args[0].toString()[0]);
+        const int indexInBank = static_cast<int>(args[1]);
+        try {
+            if (const auto pattern = readPattern(patternSlotPath(*cardRoot, bankChar, indexInBank)))
+                ok = exportPatternToMidi(*pattern, juce::File(args[2].toString()));
+        } catch (const std::exception&) {
+            ok = false;
+        }
+    }
+    respondOk(ok, completion);
+}
+
+// args: [midiPath, targetBankChar, targetIndexInBank]. Quantizes the MIDI file's notes onto the
+// pattern grid and writes the result to the target slot, overwriting whatever pattern was there
+// -- see sp404::importPatternFromMidi/writePattern.
+void handleImportPatternMidi(PluginProcessor& processor, const juce::Array<juce::var>& args,
+                              juce::WebBrowserComponent::NativeFunctionCompletion completion) {
+    bool ok = false;
+    if (const auto cardRoot = processor.resolveCardRoot();
+        cardRoot && args.size() > 2 && args[1].toString().length() == 1) {
+        const char targetBank = static_cast<char>(args[1].toString()[0]);
+        const int targetIndexInBank = static_cast<int>(args[2]);
+        try {
+            if (const auto pattern = importPatternFromMidi(juce::File(args[0].toString()))) {
+                writePattern(*cardRoot, targetBank, targetIndexInBank, *pattern);
+                ok = true;
+            }
         } catch (const std::exception&) {
             ok = false;
         }
@@ -1101,6 +1181,22 @@ juce::WebBrowserComponent::Options makeWebViewOptions(PluginProcessor& processor
                              [&processor](const juce::Array<juce::var>& args,
                                           juce::WebBrowserComponent::NativeFunctionCompletion completion) {
                                  handleCopyPattern(processor, args, completion);
+                             })
+        .withNativeFunction("pickMidiToOpen",
+                             [](const juce::Array<juce::var>&,
+                                juce::WebBrowserComponent::NativeFunctionCompletion completion) {
+                                 handlePickMidiToOpen(completion);
+                             })
+        .withNativeFunction("pickMidiToSave", handlePickMidiToSave)
+        .withNativeFunction("exportPatternMidi",
+                             [&processor](const juce::Array<juce::var>& args,
+                                          juce::WebBrowserComponent::NativeFunctionCompletion completion) {
+                                 handleExportPatternMidi(processor, args, completion);
+                             })
+        .withNativeFunction("importPatternMidi",
+                             [&processor](const juce::Array<juce::var>& args,
+                                          juce::WebBrowserComponent::NativeFunctionCompletion completion) {
+                                 handleImportPatternMidi(processor, args, completion);
                              })
         .withNativeFunction("clearBank",
                              [&processor](const juce::Array<juce::var>& args,

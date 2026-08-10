@@ -227,7 +227,11 @@ Les tests couvrent `core/` (parsing `PAD_INFO.BIN` et chunk `RLND`), voir
     et Copy… vers un slot déjà occupé) confirmée par une modale (même règle "pas d'undo" que le
     reste). Sous le détail texte de chaque slot occupé, une frise ("aperçu") place un repère par
     événement réel à sa position temporelle dans le pattern, rouge si le pad qu'il joue n'a pas
-    de sample — pratique pour repérer un trou avant de charger/déclencher le pattern.
+    de sample — pratique pour repérer un trou avant de charger/déclencher le pattern. "Export
+    MIDI…" (slot occupé) écrit un `.mid` standard (potards/pads mappés en note/canal MIDI,
+    lisible dans n'importe quel DAW) ; "Import MIDI…" fait l'inverse — quantise un `.mid`
+    quelconque sur la grille du pattern et écrit le résultat dans le slot cliqué (confirmé si le
+    slot est déjà occupé).
 
 ### Provenance des stickers
 
@@ -257,7 +261,10 @@ plugin/   cible JUCE (VST3 + AU, synthé), éditeur hébergeant une WebView (JUC
           PluginProcessor::processBlock, après le mixage des voix et avant la détection de
           clipping. SampleImport.h/.cpp décode/
           ré-échantillonne/ré-encode un fichier audio importé (voir plus haut) ; BankArchive.h/.cpp
-          gère les sauvegardes/restaurations zip (menu de gestion des banks) ; SampleDsp.h/.cpp
+          gère les sauvegardes/restaurations zip (menu de gestion des banks) ; PatternArchive.h/
+          .cpp fait de même pour un pattern individuel (bundlé avec ses pads dépendants) ;
+          PatternMidi.h/.cpp exporte/importe un pattern en fichier MIDI standard
+          (juce::MidiFile) ; SampleDsp.h/.cpp
           implémente le panneau DSP par pad (normalisation, mono/stéréo, fade, trim, BPM,
           pitch/time-stretch via Rubber Band). Tous dépendent de JUCE (et, pour SampleDsp,
           Rubber Band) et vivent donc dans plugin/, pas core/ (qui reste 100% C++ pur).
@@ -372,9 +379,26 @@ docs/     spécification du format de carte SD SP-404SX et ses sources.
     Limité pour l'instant aux patterns déjà sur la carte (le panneau "Patterns…") — pas encore
     d'aperçu du contenu d'un `.zip` avant confirmation de "Load…" (nécessiterait de parser
     `PATTERN.BIN` directement depuis le zip en mémoire, non fait dans ce tour).
-  - Export pattern → fichier MIDI standard (conversion déjà implémentée côté `AudioPattern`,
-    réutilisable comme référence) et import MIDI → pattern SP-404 en sens inverse (quantisé sur
-    la grille de 384 ticks/bar, résolution note MIDI → pad à définir).
+  - ✅ Export/import MIDI (`plugin/PatternMidi.h`/`.cpp`, boutons "Export MIDI…"/"Import
+    MIDI…" sur chaque ligne du panneau "Patterns…") via `juce::MidiFile`/`MidiMessageSequence`
+    (pas de parseur SMF maison). Chaque pad est mappé à la note MIDI (`kBasePadNote + pad - 1`,
+    même convention que le triggering live existant, voir `PluginProcessor::kBasePadNote`) sur
+    le canal `1 + banque` (A=canal 1 … J=canal 10) — la banque passe par le canal plutôt que par
+    la note pour que les 120 pads restent tous adressables sans dépasser la plage MIDI 0-127.
+    Import quantise sur la grille native de 384 ticks/bar (`sp404::kTicksPerBar`) et écrit
+    directement le pattern résultant sur le slot cible (`writePattern`, nouveau : `core/` avait
+    jusqu'ici seulement la lecture — `PatternEvent::encode`/`sp404::encode(Pattern)` ajoutés en
+    même temps, avec un test qui réencode un vrai pattern et compare octet à octet à l'original).
+    Round-trip vérifié via un harnais offline jetable sur les 3 patterns réels (bytes des
+    fixtures déjà embarquées dans `PatternTests.cpp`, carte physique déconnectée entre-temps) :
+    tick/banque/pad/vélocité identiques à 100% après export→import ; seule la *durée* d'un hit
+    peut légèrement différer quand le même pad est re-déclenché avant la fin du hit précédent
+    (chevauchement) — limitation inhérente à l'appariement note-on/note-off du format MIDI
+    standard, sans impact réel puisque ce plugin ne joue qu'une seule voix par pad de toute
+    façon (un nouveau déclenchement coupe déjà le précédent, voir Limitations plus haut). Un
+    marqueur de fin de piste explicite (`juce::MidiMessage::endOfTrack()`, positionné au vrai
+    nombre de mesures) préserve le silence de fin d'un pattern à l'export/import, qui serait
+    sinon perdu (aucune note n'ancre sa position).
   - Triggering d'un pattern entier depuis le DAW, synchronisé tempo/transport hôte (au-delà du
     triggering pad-par-pad actuel) — nécessite un scheduler interne aligné sur
     `juce::AudioPlayHead`, le plus gros morceau de cette liste.
