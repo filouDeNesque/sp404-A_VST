@@ -1,6 +1,7 @@
 #include <cmath>
 #include <vector>
 
+#include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
 #include "sp404/PatternPlayer.h"
@@ -309,4 +310,34 @@ TEST_CASE("PatternPlayer::stop clears pending note-offs", "[PatternPlayer]") {
     // leaving a stale entry that could resurrect itself on a later start() of a *different*
     // pattern reusing the same PatternPlayer instance) is covered by the "start() clears..." test
     // above using the same longNote setup -- this test just documents the stop()-specific intent.
+}
+
+TEST_CASE("nextBarBoundaryPpq returns the current position when already exactly on a bar", "[PatternPlayer]") {
+    CHECK(sp404::nextBarBoundaryPpq(0.0, 4, 4) == Catch::Approx(0.0));
+    CHECK(sp404::nextBarBoundaryPpq(4.0, 4, 4) == Catch::Approx(4.0));
+    CHECK(sp404::nextBarBoundaryPpq(16.0, 4, 4) == Catch::Approx(16.0));
+}
+
+TEST_CASE("nextBarBoundaryPpq rounds up to the next bar when mid-bar, in 4/4", "[PatternPlayer]") {
+    CHECK(sp404::nextBarBoundaryPpq(1.0, 4, 4) == Catch::Approx(4.0));
+    CHECK(sp404::nextBarBoundaryPpq(3.999, 4, 4) == Catch::Approx(4.0));
+    CHECK(sp404::nextBarBoundaryPpq(4.001, 4, 4) == Catch::Approx(8.0));
+    CHECK(sp404::nextBarBoundaryPpq(17.5, 4, 4) == Catch::Approx(20.0));
+}
+
+TEST_CASE("nextBarBoundaryPpq honours non-4/4 time signatures", "[PatternPlayer]") {
+    // 3/4: 3 beats/bar.
+    CHECK(sp404::nextBarBoundaryPpq(0.0, 3, 4) == Catch::Approx(0.0));
+    CHECK(sp404::nextBarBoundaryPpq(1.0, 3, 4) == Catch::Approx(3.0));
+    CHECK(sp404::nextBarBoundaryPpq(3.0, 3, 4) == Catch::Approx(3.0));
+    // 6/8: 6 * (4/8) = 3 beats/bar (JUCE's PPQ is always in quarter notes regardless of the
+    // denominator, matching AudioPlayHead::PositionInfo::TimeSignature's convention).
+    CHECK(sp404::nextBarBoundaryPpq(1.0, 6, 8) == Catch::Approx(3.0));
+    CHECK(sp404::nextBarBoundaryPpq(3.5, 6, 8) == Catch::Approx(6.0));
+}
+
+TEST_CASE("nextBarBoundaryPpq falls back to 4/4 for a non-positive time signature", "[PatternPlayer]") {
+    CHECK(sp404::nextBarBoundaryPpq(1.0, 0, 0) == Catch::Approx(4.0));
+    CHECK(sp404::nextBarBoundaryPpq(1.0, -1, 4) == Catch::Approx(4.0));
+    CHECK(sp404::nextBarBoundaryPpq(1.0, 4, -1) == Catch::Approx(4.0));
 }

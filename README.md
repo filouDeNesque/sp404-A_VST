@@ -433,9 +433,11 @@ docs/     spécification du format de carte SD SP-404SX et ses sources.
 ### Triggering de pattern (`sp404::PatternPlayer`, `PluginProcessor`) — état détaillé
 
 **Fait** : un bouton "▶ Play" sur chaque ligne du panneau "Patterns…" déclenche la lecture
-temps réel du pattern, **synchronisée au tempo (BPM) de l'hôte** et **asservie à son
-lecteur** (play/pause de l'hôte = avance/gèle le pattern) — ce n'est **pas** encore un
-alignement complet sur la *position* du transport hôte (voir "Non fait" plus bas).
+temps réel du pattern, **synchronisée au tempo (BPM) de l'hôte**, **asservie à son
+lecteur** (play/pause de l'hôte = avance/gèle le pattern), et **quantifiée au démarrage sur la
+prochaine mesure de l'hôte** (voir le nouveau bullet ci-dessous) — ce n'est **pas** encore un
+alignement *continu* sur la *position* du transport hôte pendant toute la lecture (voir "Non
+fait" plus bas).
 
 - `core/include/sp404/PatternPlayer.h`/`.cpp` (nouveau, 100% C++ pur, zéro dépendance JUCE) :
   scheduler qui convertit les ticks du pattern en échantillons via le BPM courant
@@ -481,16 +483,41 @@ alignement complet sur la *position* du transport hôte (voir "Non fait" plus ba
   sans condition de `gate`, toute voix de pattern encore active au moment de l'arrêt — sinon un
   pad `gate`+`loop` resterait bloqué à boucler indéfiniment puisque plus aucune note-off future
   ne viendrait jamais le couper une fois le scheduler arrêté.
-- **Vérification** : 55/55 `ctest` (15 tests `PatternPlayer` au total, dont 5 nouveaux
-  spécifiquement pour le note-off — note-off dans le même bloc, note-off plusieurs blocs plus
-  tard, aucune note-off programmée pour une durée nulle, `start()`/`stop()` qui nettoient bien
-  les note-offs en attente), build complet propre, 3/3 `auval`. **Même limite qu'avant** : la
-  lecture audio bout-en-bout dans un vrai DAW n'a toujours pas pu être vérifiée dans cet
+- ✅ **Quantification du démarrage sur la prochaine mesure hôte** (ajouté après le tour
+  note-off) : plutôt qu'un `PatternPlayer::start()` immédiat, `triggerPattern()` "arme" le
+  pattern (`PluginProcessor::pendingLaunchPattern`) et calcule, via la nouvelle fonction pure
+  `sp404::nextBarBoundaryPpq(currentPpq, timeSigNumerator, timeSigDenominator)`
+  (`core/include/sp404/PatternPlayer.h`/`.cpp`, zéro dépendance JUCE comme le reste du
+  scheduler), la position PPQ de la prochaine limite de mesure hôte à partir de
+  `AudioPlayHead::PositionInfo::getPpqPosition()`/`getTimeSignature()`. Chaque bloc audio suivant
+  vérifie si la position PPQ courante de l'hôte a atteint ce point pour démarrer réellement le
+  `PatternPlayer` à ce moment précis — ce qui fait qu'un pattern déclenché en plein milieu d'une
+  mesure hôte attend la limite de mesure suivante plutôt que de démarrer immédiatement en
+  décalage, comme le fait un clip launcher classique (Ableton Live et équivalents). Repli sur un
+  démarrage immédiat si l'hôte ne rapporte pas de position PPQ du tout (hôte minimal/standalone
+  sans concept de transport) — le comportement précédent, inchangé dans ce cas. `Stop All` et
+  `Stop` (sur un pattern) annulent désormais aussi un déclenchement armé mais pas encore
+  démarré (`pendingLaunchPattern = nullptr`), pour qu'un Stop juste après un Play ne fasse pas
+  démarrer le pattern par surprise à la mesure suivante. `patternPlayingFlag` (état affiché côté
+  UI) passe à vrai dès l'armement, pas seulement au démarrage effectif, pour que l'utilisateur
+  ait un retour immédiat que le déclenchement a bien été pris en compte pendant l'attente.
+  `nextBarBoundaryPpq` couvre aussi les mesures non-4/4 (testé en 3/4 et 6/8) et retombe sur 4/4
+  si l'hôte ne rapporte pas de signature rythmique valide. **4 nouveaux tests** dans
+  `PatternPlayerTests.cpp` : position déjà exactement sur une limite de mesure (retour immédiat,
+  pas d'attente d'une mesure entière inutile), arrondi vers le haut en plein mesure (4/4),
+  signatures non-4/4, repli sur 4/4 pour une signature invalide.
+- **Vérification** : 59/59 `ctest` (19 tests liés à `PatternPlayer` au total : 15 précédents +
+  4 nouveaux pour `nextBarBoundaryPpq`), build complet propre, 3/3 `auval`. **Même limite
+  qu'avant** : la lecture audio bout-en-bout dans un vrai DAW — y compris le comportement de
+  quantification lui-même en conditions réelles (déclencher un pattern en plein mesure et
+  entendre qu'il attend bien la limite suivante) — n'a toujours pas pu être vérifiée dans cet
   environnement (pas d'hôte disponible) — à tester manuellement.
 
-**Non fait** : alignement complet sur la *position* du transport hôte (un pattern démarré
-recommencerait toujours à sa propre mesure 1, pas à la mesure courante de la timeline hôte ; pas
-de verrouillage de phase avec les limites de mesure de l'hôte) ; vélocité des événements de
-pattern ; jouer plusieurs patterns simultanément (un seul `PatternPlayer` par instance de plugin
-actuellement).
+**Non fait** : alignement *continu* sur la *position* du transport hôte pendant toute la durée
+de la lecture (un pattern déjà lancé ne se recale jamais sur la timeline hôte si celle-ci saute/
+boucle/est déplacée manuellement en cours de route — seul le *démarrage* est quantifié sur la
+prochaine mesure, voir ci-dessus ; gérer un saut/bouclage arbitraire de l'hôte en cours de
+lecture nécessiterait de repenser le modèle de suivi des note-off en attente, qui suppose une
+progression monotone) ; vélocité des événements de pattern ; jouer plusieurs patterns
+simultanément (un seul `PatternPlayer` par instance de plugin actuellement).
 

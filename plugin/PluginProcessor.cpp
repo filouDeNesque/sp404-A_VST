@@ -387,11 +387,13 @@ void PluginProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiB
             stopVoice(voice);
         patternPlayer.stop();
         patternPlayingFlag.store(false, std::memory_order_relaxed);
+        pendingLaunchPattern = nullptr; // cancel a queued-to-launch trigger too, not just a playing one
     }
 
     if (patternStopRequested.exchange(false, std::memory_order_relaxed)) {
         patternPlayer.stop();
         patternPlayingFlag.store(false, std::memory_order_relaxed);
+        pendingLaunchPattern = nullptr; // same: don't let an armed trigger surprise-launch after Stop
         // Unconditional (not gate-only, unlike the note-off handling below): a pad that's still
         // sounding because it's gated *and* looping would otherwise never get a note-off again
         // once the scheduler that would have sent one has stopped, and keep looping forever.
@@ -401,16 +403,26 @@ void PluginProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiB
 
     // Queried once per block and reused below for both starting a newly-triggered pattern at the
     // right tempo and for keeping an already-playing one in sync -- this is *tempo* sync plus
-    // *play/stop* sync, not full bar-aligned *position* sync to the host timeline (see the class's
-    // doc comment in PluginProcessor.h for what that would still take). Hosts that don't report a
+    // *play/stop* sync, plus *launch*-quantization to the next bar boundary (see below) -- not
+    // full continuous bar-aligned *position* sync to the host timeline (see the class's doc
+    // comment in PluginProcessor.h for what that would still take). Hosts that don't report a
     // play state at all default to "playing", so pattern playback still works when hosted
-    // standalone/by a simple test host with no transport concept.
+    // standalone/by a simple test host with no transport concept. ppqPosition stays unset (and
+    // launch-quantization falls back to starting immediately, see below) for the same reason.
     double hostBpm = 120.0;
     bool hostIsPlaying = true;
+    juce::Optional<double> ppqPosition;
+    int timeSigNumerator = 4;
+    int timeSigDenominator = 4;
     if (auto* playHead = getPlayHead()) {
         if (const auto position = playHead->getPosition()) {
             hostBpm = position->getBpm().orFallback(120.0);
             hostIsPlaying = position->getIsPlaying();
+            ppqPosition = position->getPpqPosition();
+            if (const auto timeSig = position->getTimeSignature()) {
+                timeSigNumerator = timeSig->numerator;
+                timeSigDenominator = timeSig->denominator;
+            }
         }
     }
 
@@ -425,11 +437,32 @@ void PluginProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiB
             activePatternBanks = pendingPatternBanks;
         }
         if (newPattern != nullptr) {
-            patternPlayer.start(*newPattern, hostBpm, currentSampleRate);
+            if (ppqPosition) {
+                // Arm rather than start immediately: PatternPlayer::start() actually runs once
+                // the block below sees the host's PPQ position reach pendingLaunchPpq. Setting
+                // patternPlayingFlag now (not only once it actually launches) is deliberate UI
+                // feedback that the trigger was registered, even during the wait for the bar.
+                pendingLaunchPattern = newPattern;
+                pendingLaunchPpq = nextBarBoundaryPpq(*ppqPosition, timeSigNumerator, timeSigDenominator);
+            } else {
+                patternPlayer.start(*newPattern, hostBpm, currentSampleRate);
+            }
             patternPlayingFlag.store(true, std::memory_order_relaxed);
         }
     } else {
         patternPlayer.setTempo(hostBpm);
+    }
+
+    // A pattern armed just above (or in an earlier block, if its bar boundary hasn't arrived yet)
+    // actually launches once the host's PPQ position reaches it. No-op every block a trigger isn't
+    // pending. Falls back to launching immediately if the host stops reporting a PPQ position
+    // between arming and launch (shouldn't happen in practice, but avoids a trigger silently never
+    // starting if it did).
+    if (pendingLaunchPattern != nullptr) {
+        if (!ppqPosition || *ppqPosition >= pendingLaunchPpq) {
+            patternPlayer.start(*pendingLaunchPattern, hostBpm, currentSampleRate);
+            pendingLaunchPattern = nullptr;
+        }
     }
 
     // Merges any pending previewPadOn()/previewPadOff() calls (from a UI pad click) into `midi`

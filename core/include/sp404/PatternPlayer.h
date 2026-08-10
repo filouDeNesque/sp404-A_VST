@@ -104,4 +104,14 @@ private:
     double samplesPerTick() const;
 };
 
+// Computes the PPQ position of the next bar boundary at or after currentPpq, for the given host
+// time signature (e.g. 4, 4). Used to "arm" a triggered pattern to launch on the host's next bar
+// rather than starting immediately mid-bar -- see PluginProcessor::triggerPattern's doc comment
+// for why this is *launch* quantization only, not continuous position sync. If currentPpq already
+// sits on a bar boundary (within a small epsilon), returns currentPpq itself -- no need to wait a
+// full bar when the trigger lands exactly on one. Falls back to assuming 4/4 if either time
+// signature field is not positive (matches the fallback already used for a host that doesn't
+// report a time signature at all).
+double nextBarBoundaryPpq(double currentPpq, int timeSigNumerator, int timeSigDenominator);
+
 } // namespace sp404

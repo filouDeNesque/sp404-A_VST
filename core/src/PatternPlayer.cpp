@@ -103,4 +103,19 @@ void PatternPlayer::advance(int numSamples, std::vector<PatternTriggerEvent>& ou
     }
 }
 
+double nextBarBoundaryPpq(double currentPpq, int timeSigNumerator, int timeSigDenominator) {
+    double beatsPerBar = 4.0;
+    if (timeSigNumerator > 0 && timeSigDenominator > 0)
+        beatsPerBar = timeSigNumerator * (4.0 / timeSigDenominator);
+    if (!(beatsPerBar > 0.0))
+        beatsPerBar = 4.0;
+
+    constexpr double kEpsilonBeats = 1.0e-6;
+    const double barsSoFar = std::floor(currentPpq / beatsPerBar + kEpsilonBeats);
+    double target = barsSoFar * beatsPerBar;
+    if (target < currentPpq - kEpsilonBeats)
+        target += beatsPerBar;
+    return target;
+}
+
 } // namespace sp404

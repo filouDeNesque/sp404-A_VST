@@ -111,15 +111,19 @@ public:
     // screen graphic red.
     bool isClipping() const { return clippingFlag.load(std::memory_order_relaxed); }
 
-    // --- Pattern playback (tempo-synced to host BPM + gated on host transport play/stop; NOT
-    // full bar-aligned host-transport-*position* sync -- see README roadmap for what that would
-    // still take) -----------------------------------------------------------------------------
+    // --- Pattern playback (tempo-synced to host BPM, gated on host transport play/stop, and
+    // *launch*-quantized to the host's next bar boundary if the host reports a PPQ position --
+    // NOT continuous bar-aligned *position* sync, i.e. a pattern doesn't keep re-locking to the
+    // host's timeline while it plays (scrubbing/looping the host transport doesn't rewind or
+    // jump the pattern) -- see README roadmap for what that would still take) -----------------
     // Message-thread only (does file I/O: reads the pattern file plus every bank its events
     // reference, since a pattern's storage slot and the banks it plays are independent of each
     // other -- see sp404::patternSlotPath's doc comment). Hands the result to the audio thread
     // the same way BankLoader hands off its currentBank (see BankLoader.h): a SpinLock-guarded
-    // shared_ptr swap, picked up at the top of the next processBlock. Loops until stopPattern()
-    // is called. Returns false if there's no pattern recorded at that slot.
+    // shared_ptr swap, picked up at the top of the next processBlock -- which arms it to launch
+    // at the next host bar boundary rather than starting immediately (falls back to starting
+    // immediately if the host doesn't report a PPQ position/time signature at all). Loops until
+    // stopPattern() is called. Returns false if there's no pattern recorded at that slot.
     bool triggerPattern(char bank, int indexInBank);
     // Realtime-safe (single atomic store); the audio thread stops scheduling new triggers at the
     // top of the next processBlock. Doesn't forcibly silence pads already sounding from the
@@ -267,6 +271,13 @@ private:
     std::atomic<bool> patternPlayingFlag{false};
     std::atomic<char> playingPatternBank{0};
     std::atomic<int> playingPatternIndexInBank{0};
+
+    // Audio-thread-only (no cross-thread access, unlike the members above): a pattern armed by a
+    // just-consumed trigger but not yet actually started, waiting for the host's PPQ position to
+    // reach pendingLaunchPpq (the next bar boundary at the moment it was armed) -- see
+    // triggerPattern()'s doc comment. Non-null exactly while "queued to launch".
+    std::shared_ptr<const sp404::Pattern> pendingLaunchPattern;
+    double pendingLaunchPpq = 0.0;
 
     // Defaults to offline (mirror) rather than live: safer first-run behaviour (no accidental
     // writes to a connected card) and matches bankLoader's default of Bank A -- "just open and
