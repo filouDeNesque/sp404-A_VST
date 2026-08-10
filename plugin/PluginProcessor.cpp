@@ -380,13 +380,23 @@ void PluginProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiB
     juce::ScopedNoDenormals noDenormals;
     buffer.clear();
 
-    if (stopAllRequested.exchange(false, std::memory_order_relaxed))
+    if (stopAllRequested.exchange(false, std::memory_order_relaxed)) {
         for (auto& voice : voices)
             stopVoice(voice);
+        for (auto& voice : patternVoices)
+            stopVoice(voice);
+        patternPlayer.stop();
+        patternPlayingFlag.store(false, std::memory_order_relaxed);
+    }
 
     if (patternStopRequested.exchange(false, std::memory_order_relaxed)) {
         patternPlayer.stop();
         patternPlayingFlag.store(false, std::memory_order_relaxed);
+        // Unconditional (not gate-only, unlike the note-off handling below): a pad that's still
+        // sounding because it's gated *and* looping would otherwise never get a note-off again
+        // once the scheduler that would have sent one has stopped, and keep looping forever.
+        for (auto& voice : patternVoices)
+            stopVoice(voice);
     }
 
     // Queried once per block and reused below for both starting a newly-triggered pattern at the
@@ -428,14 +438,23 @@ void PluginProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiB
     keyboardState.processNextMidiBuffer(midi, 0, buffer.getNumSamples(), true);
 
     patternTriggerScratch.clear();
-    if (patternPlayer.isPlaying() && hostIsPlaying)
+    if (patternPlayer.isPlaying() && hostIsPlaying) {
         patternPlayer.advance(buffer.getNumSamples(), patternTriggerScratch);
+        // advance() appends a block's note-offs after that block's note-ons, which for a very
+        // short note can put a note-off earlier in sample-time behind a later note-on in vector
+        // order -- sort so the merge below can walk both event sources with a simple two-pointer
+        // pass (see PatternPlayer::advance's doc comment). Small vector (a handful of events in
+        // the overwhelming majority of blocks), so this is not a meaningful audio-thread cost.
+        std::sort(patternTriggerScratch.begin(), patternTriggerScratch.end(),
+                  [](const PatternTriggerEvent& a, const PatternTriggerEvent& b) {
+                      return a.sampleOffsetInBlock < b.sampleOffsetInBlock;
+                  });
+    }
 
     // Merges the real MIDI buffer (already sample-sorted, guaranteed by JUCE) with
-    // patternTriggerScratch (sorted by construction -- PatternPlayer emits events in the order
-    // its pattern stores them, which readPattern() already requires to be tick-ascending) via a
-    // manual two-pointer walk, so both event sources render at their correct sample-accurate
-    // position within the block without needing to allocate a combined list.
+    // patternTriggerScratch (sorted just above) via a manual two-pointer walk, so both event
+    // sources render at their correct sample-accurate position within the block without needing
+    // to allocate a combined list.
     int samplePos = 0;
     auto midiIt = midi.begin();
     const auto midiEnd = midi.end();
@@ -459,10 +478,24 @@ void PluginProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiB
             ++midiIt;
         } else {
             const auto& event = patternTriggerScratch[patternIdx];
-            const auto bankIdx = static_cast<size_t>(event.bank - 'A');
-            if (bankIdx < activePatternBanks.size() && activePatternBanks[bankIdx] != nullptr)
-                triggerVoice(patternVoices, kMaxPatternPolyphony, activePatternBanks[bankIdx],
-                             event.padIndexInBank - 1);
+            if (!event.isNoteOff) {
+                const auto bankIdx = static_cast<size_t>(event.bank - 'A');
+                if (bankIdx < activePatternBanks.size() && activePatternBanks[bankIdx] != nullptr)
+                    triggerVoice(patternVoices, kMaxPatternPolyphony, activePatternBanks[bankIdx],
+                                 event.padIndexInBank - 1);
+            } else {
+                // Same "only cut a *gated* pad early" rule as handleMidiMessage's live-MIDI
+                // note-off below -- an ungated pad just keeps playing to its natural end/loop.
+                const int padIndex = event.padIndexInBank - 1;
+                for (auto& voice : patternVoices) {
+                    if (voice.active && voice.padIndex == padIndex && voice.bank != nullptr &&
+                        voice.bank->name == event.bank) {
+                        if (voice.bank->pads[static_cast<size_t>(padIndex)].info.gate)
+                            stopVoice(voice);
+                        break;
+                    }
+                }
+            }
             ++patternIdx;
         }
     }

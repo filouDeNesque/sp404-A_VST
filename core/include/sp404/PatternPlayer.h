@@ -8,16 +8,21 @@
 namespace sp404 {
 
 // One scheduled trigger, emitted by PatternPlayer::advance(): which pad to play, and how many
-// samples into the block being processed it should fire.
+// samples into the block being processed it should fire. isNoteOff distinguishes a note landing
+// (velocity carries through, see below) from that same note's scheduled release
+// (tick + lengthTicks): the caller decides what a note-off actually does (this plugin's live MIDI
+// only cuts a *gated* pad early on note-off, and lets an ungated one play out regardless -- see
+// PluginProcessor::handleMidiMessage -- pattern playback follows the same rule).
 struct PatternTriggerEvent {
     char bank = 'A';
     int padIndexInBank = 1;
     int sampleOffsetInBlock = 0; // 0-based, always < the numSamples passed to advance()
-    uint8_t velocity = 0;       // carried through from the pattern event; see PluginProcessor for
-                                  // whether/how it's used (this plugin's live MIDI triggering
-                                  // already ignores velocity -- pads always play at their own
-                                  // configured volume, see docs/README -- so this exists for a
-                                  // future caller that might want it, not because one uses it yet)
+    uint8_t velocity = 0;       // meaningless (0) on a note-off; carried through from the pattern
+                                  // event on a note-on. This plugin's live MIDI triggering already
+                                  // ignores velocity -- pads always play at their own configured
+                                  // volume, see docs/README -- so this exists for a future caller
+                                  // that might want it, not because one uses it yet.
+    bool isNoteOff = false;
 };
 
 // Tracks real-time playback of one Pattern, tempo-synced to a caller-supplied BPM (typically the
@@ -53,11 +58,29 @@ public:
     // every event that fires during that span to outEvents (not cleared first -- caller's
     // responsibility, so multiple sources can share one scratch buffer across a block if wanted).
     // Loops back to the start of the pattern automatically -- see the class comment.
+    //
+    // Every note-on with a nonzero lengthTicks schedules a matching note-off (see
+    // PatternTriggerEvent), which may fire many blocks later (or after several loops, for a note
+    // that's still sustaining when playback wraps) -- tracked internally, no caller bookkeeping
+    // needed. Within one advance() call, note-offs are appended to outEvents *after* that block's
+    // note-ons, which can put a note-off earlier in tick-time behind a later-in-tick-time note-on
+    // in vector order for very short notes -- outEvents is not guaranteed globally sorted by
+    // sampleOffsetInBlock; sort it yourself first if your merge logic depends on that (see
+    // PluginProcessor::processBlock, which does).
     void advance(int numSamples, std::vector<PatternTriggerEvent>& outEvents);
 
 private:
+    // A note-on scheduled to receive a matching note-off once playback reaches offAbsoluteTick --
+    // may span many advance() calls (and even loop wraps) between being scheduled and firing.
+    struct PendingNoteOff {
+        double offAbsoluteTick = 0.0;
+        char bank = 'A';
+        int padIndexInBank = 1;
+    };
+
     Pattern pattern;
     std::vector<int> eventTicks; // absoluteEventTicks(pattern), cached at start() so advance() never recomputes it
+    std::vector<PendingNoteOff> pendingNoteOffs; // typically tiny (a handful at most); linear scan is fine
     double bpm = 120.0;
     double sampleRate = 44100.0;
 

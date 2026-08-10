@@ -462,22 +462,35 @@ alignement complet sur la *position* du transport hôte (voir "Non fait" plus ba
   logique de vol de voix déjà existante dans `handleMidiMessage` (mêmes règles : retrigger du
   même pad ne compte pas dans la polyphonie, le plus ancien est coupé en premier) sans toucher
   au chemin MIDI live d'origine, pour garantir zéro risque de régression sur ce qui marchait déjà.
-- Vélocité et note-off/gate des événements de pattern ne sont **pas** modélisés dans cette
-  passe : chaque hit joue à son volume de pad configuré (comme le MIDI live, qui ignore déjà la
-  vélocité) et jusqu'à sa fin naturelle (loop/one-shot), sans coupure anticipée sur un pad en
-  mode `gate` — simplification délibérée pour ce premier tour.
-- **Vérification** : 50/50 `ctest` (10 nouveaux tests `PatternPlayer`), build complet propre,
-  3/3 `auval`. **Limite assumée et importante** : je n'ai pas pu tester la lecture réelle dans
-  un vrai DAW dans cet environnement (pas d'hôte audio disponible) — le scheduler lui-même est
-  vérifié de façon exhaustive en isolation (y compris sous stress de dérive numérique), et
-  l'intégration dans `processBlock` a été relue avec soin, mais le chemin bout-en-bout
-  (déclenchement UI → lecture audible synchronisée dans un vrai hôte) n'a **pas** été confirmé
-  à l'oreille. À tester manuellement avant de considérer cette fonctionnalité fiable en
-  production.
+- ✅ **Note-off/gate** (ajouté après le tour initial) : `PatternPlayer` calcule, pour chaque
+  note-on avec une durée (`lengthTicks`) non nulle, le tick absolu de sa fin et programme un
+  événement de note-off correspondant (`PatternTriggerEvent::isNoteOff`) — potentiellement
+  plusieurs blocs (voire plusieurs boucles) plus tard, suivi via une petite liste interne
+  (`pendingNoteOffs`, vidée par `stop()`/`start()` pour ne jamais laisser une note-off d'un
+  ancien pattern resurgir sur le suivant). `PluginProcessor` applique alors exactement la même
+  règle que le MIDI live (`handleMidiMessage`) : un pad en mode `gate` est coupé à ce moment,
+  un pad sans `gate` continue jusqu'à sa fin naturelle. Comme `advance()` peut désormais
+  produire des événements pas strictement triés par tick (une note très courte peut voir sa
+  note-off dépasser une note-on suivante dans l'ordre du vecteur), `processBlock` trie
+  `patternTriggerScratch` par position d'échantillon avant la fusion avec le buffer MIDI.
+  Vélocité toujours pas modélisée (comme le MIDI live, qui l'ignore déjà — chaque hit joue au
+  volume configuré du pad).
+- **Corrections annexes découvertes en implémentant ceci** : "Stop All" (bouton Cancel/Stop
+  général) ne coupait pas les voix de pattern ni le scheduler lui-même — corrigé, un Stop All
+  arrête maintenant tout sans exception. "Stop" sur un pattern spécifique coupe désormais aussi,
+  sans condition de `gate`, toute voix de pattern encore active au moment de l'arrêt — sinon un
+  pad `gate`+`loop` resterait bloqué à boucler indéfiniment puisque plus aucune note-off future
+  ne viendrait jamais le couper une fois le scheduler arrêté.
+- **Vérification** : 55/55 `ctest` (15 tests `PatternPlayer` au total, dont 5 nouveaux
+  spécifiquement pour le note-off — note-off dans le même bloc, note-off plusieurs blocs plus
+  tard, aucune note-off programmée pour une durée nulle, `start()`/`stop()` qui nettoient bien
+  les note-offs en attente), build complet propre, 3/3 `auval`. **Même limite qu'avant** : la
+  lecture audio bout-en-bout dans un vrai DAW n'a toujours pas pu être vérifiée dans cet
+  environnement (pas d'hôte disponible) — à tester manuellement.
 
 **Non fait** : alignement complet sur la *position* du transport hôte (un pattern démarré
 recommencerait toujours à sa propre mesure 1, pas à la mesure courante de la timeline hôte ; pas
-de verrouillage de phase avec les limites de mesure de l'hôte) ; note-off/gate/vélocité des
-événements de pattern ; jouer plusieurs patterns simultanément (un seul `PatternPlayer` par
-instance de plugin actuellement).
+de verrouillage de phase avec les limites de mesure de l'hôte) ; vélocité des événements de
+pattern ; jouer plusieurs patterns simultanément (un seul `PatternPlayer` par instance de plugin
+actuellement).
 

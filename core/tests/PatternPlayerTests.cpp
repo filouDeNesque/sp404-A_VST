@@ -8,13 +8,15 @@
 namespace {
 
 // 4 quarter-note-spaced events (one per beat of a 4/4 bar), on 4 distinct pads so each fired
-// event is unambiguous. bars=1 -> totalTicks() == 384.
+// event is unambiguous. bars=1 -> totalTicks() == 384. lengthTicks=0 -- these tests are about
+// note-on scheduling only, so no note-off should ever be scheduled here (see the dedicated
+// note-off tests further down, which build their own small patterns with a nonzero length).
 sp404::Pattern makeQuarterNotePattern() {
     sp404::Pattern pattern;
-    pattern.events.push_back(sp404::makeNoteEvent('A', 1, 0, 100, 10));  // tick 0
-    pattern.events.push_back(sp404::makeNoteEvent('B', 2, 96, 110, 10)); // tick 96
-    pattern.events.push_back(sp404::makeNoteEvent('C', 3, 96, 120, 10)); // tick 192
-    pattern.events.push_back(sp404::makeNoteEvent('D', 4, 96, 130, 10)); // tick 288
+    pattern.events.push_back(sp404::makeNoteEvent('A', 1, 0, 100, 0));  // tick 0
+    pattern.events.push_back(sp404::makeNoteEvent('B', 2, 96, 110, 0)); // tick 96
+    pattern.events.push_back(sp404::makeNoteEvent('C', 3, 96, 120, 0)); // tick 192
+    pattern.events.push_back(sp404::makeNoteEvent('D', 4, 96, 130, 0)); // tick 288
     pattern.bars = 1;
     return pattern;
 }
@@ -204,4 +206,107 @@ TEST_CASE("PatternPlayer::start falls back to the previous tempo for a non-posit
     std::vector<sp404::PatternTriggerEvent> events;
     player.advance(384 * 250, events); // still fires using the default 120bpm (250 samples/tick)
     CHECK(events.size() == 4);
+}
+
+TEST_CASE("PatternPlayer schedules a note-off within the same block for a short note", "[PatternPlayer]") {
+    sp404::Pattern pattern;
+    pattern.events.push_back(sp404::makeNoteEvent('A', 1, 0, 100, 10)); // tick 0, off at tick 10
+    pattern.bars = 1;
+
+    sp404::PatternPlayer player;
+    player.start(pattern, 120.0, 48000.0); // 250 samples/tick -> off at sample 2500
+
+    std::vector<sp404::PatternTriggerEvent> events;
+    player.advance(3000, events);
+
+    REQUIRE(events.size() == 2);
+    CHECK_FALSE(events[0].isNoteOff);
+    CHECK(events[0].bank == 'A');
+    CHECK(events[0].padIndexInBank == 1);
+    CHECK(events[0].sampleOffsetInBlock == 0);
+    CHECK(events[0].velocity == 100);
+
+    CHECK(events[1].isNoteOff);
+    CHECK(events[1].bank == 'A');
+    CHECK(events[1].padIndexInBank == 1);
+    CHECK(events[1].sampleOffsetInBlock == 2500);
+    CHECK(events[1].velocity == 0); // meaningless on a note-off, see PatternTriggerEvent's doc comment
+}
+
+TEST_CASE("PatternPlayer schedules a note-off that fires several blocks after its note-on", "[PatternPlayer]") {
+    sp404::Pattern pattern;
+    pattern.events.push_back(sp404::makeNoteEvent('B', 5, 0, 100, 200)); // tick 0, off at tick 200
+    pattern.bars = 1;
+
+    sp404::PatternPlayer player;
+    player.start(pattern, 120.0, 48000.0); // 250 samples/tick -> off at sample 50000
+
+    std::vector<sp404::PatternTriggerEvent> firstBlock;
+    player.advance(20000, firstBlock); // tick 0 -> 80: note-on fires, off (tick 200) not reached yet
+    REQUIRE(firstBlock.size() == 1);
+    CHECK_FALSE(firstBlock[0].isNoteOff);
+
+    std::vector<sp404::PatternTriggerEvent> secondBlock;
+    player.advance(40000, secondBlock); // tick 80 -> 240: off (tick 200, sample 50000) fires at offset 30000
+    REQUIRE(secondBlock.size() == 1);
+    CHECK(secondBlock[0].isNoteOff);
+    CHECK(secondBlock[0].bank == 'B');
+    CHECK(secondBlock[0].padIndexInBank == 5);
+    CHECK(secondBlock[0].sampleOffsetInBlock == 30000);
+}
+
+TEST_CASE("PatternPlayer never schedules a note-off for a zero-length note", "[PatternPlayer]") {
+    sp404::Pattern pattern;
+    pattern.events.push_back(sp404::makeNoteEvent('A', 1, 0, 100, 0)); // lengthTicks == 0
+    pattern.bars = 1;
+
+    sp404::PatternPlayer player;
+    player.start(pattern, 120.0, 48000.0);
+
+    std::vector<sp404::PatternTriggerEvent> events;
+    player.advance(384 * 250, events); // a full loop -- would catch a stray note-off anywhere in it
+    REQUIRE(events.size() == 1);
+    CHECK_FALSE(events[0].isNoteOff);
+}
+
+TEST_CASE("PatternPlayer::start clears pending note-offs left over from a previous pattern", "[PatternPlayer]") {
+    sp404::Pattern longNote;
+    longNote.events.push_back(sp404::makeNoteEvent('A', 1, 0, 100, 50000)); // off far in the future (must stay <= 65535, uint16_t)
+    longNote.bars = 64;
+
+    sp404::PatternPlayer player;
+    player.start(longNote, 120.0, 48000.0);
+
+    std::vector<sp404::PatternTriggerEvent> events;
+    player.advance(1000, events); // note-on fires, note-off scheduled for way later
+    REQUIRE(events.size() == 1);
+    events.clear();
+
+    // Switch to a completely different, short pattern before the first one's note-off would ever
+    // have fired.
+    player.start(makeQuarterNotePattern(), 120.0, 48000.0);
+    player.advance(384 * 250, events); // a full loop of the new pattern
+    for (const auto& e : events)
+        CHECK_FALSE(e.isNoteOff); // none of these should be the old pattern's leftover note-off
+    CHECK(events.size() == 4);     // exactly the new pattern's 4 note-ons, nothing extra
+}
+
+TEST_CASE("PatternPlayer::stop clears pending note-offs", "[PatternPlayer]") {
+    sp404::Pattern longNote;
+    longNote.events.push_back(sp404::makeNoteEvent('A', 1, 0, 100, 50000));
+    longNote.bars = 64;
+
+    sp404::PatternPlayer player;
+    player.start(longNote, 120.0, 48000.0);
+
+    std::vector<sp404::PatternTriggerEvent> events;
+    player.advance(1000, events);
+    REQUIRE(events.size() == 1);
+
+    player.stop();
+    CHECK_FALSE(player.isPlaying());
+    // No direct way to inspect pendingNoteOffs from outside, but stop() clearing it (rather than
+    // leaving a stale entry that could resurrect itself on a later start() of a *different*
+    // pattern reusing the same PatternPlayer instance) is covered by the "start() clears..." test
+    // above using the same longNote setup -- this test just documents the stop()-specific intent.
 }

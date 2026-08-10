@@ -15,6 +15,7 @@ double PatternPlayer::samplesPerTick() const {
 void PatternPlayer::start(const Pattern& newPattern, double newBpm, double newSampleRate) {
     pattern = newPattern;
     eventTicks = absoluteEventTicks(pattern);
+    pendingNoteOffs.clear();
     bpm = newBpm > 0.0 ? newBpm : bpm;
     sampleRate = newSampleRate > 0.0 ? newSampleRate : sampleRate;
     tickPositionAtEpoch = 0.0;
@@ -26,6 +27,7 @@ void PatternPlayer::start(const Pattern& newPattern, double newBpm, double newSa
 
 void PatternPlayer::stop() {
     playing = false;
+    pendingNoteOffs.clear();
 }
 
 void PatternPlayer::setTempo(double newBpm) {
@@ -54,6 +56,13 @@ void PatternPlayer::advance(int numSamples, std::vector<PatternTriggerEvent>& ou
 
     const int totalTicks = pattern.totalTicks();
 
+    // Converts an absolute tick position within this block to a clamped sample offset -- shared
+    // by both the note-on walk and the pending-note-off scan below.
+    const auto tickToOffset = [&](double absoluteTick) {
+        const double samplesIntoBlock = (absoluteTick - blockStartTick) * spt;
+        return std::clamp(static_cast<int>(std::llround(samplesIntoBlock)), 0, std::max(0, numSamples - 1));
+    };
+
     // Walk forward through events (in order, looping via loopCount) until the next one's
     // absolute tick position -- loopCount * totalTicks + its own tick within the pattern -- falls
     // at or after this block's end. Each event at or after blockStartTick but before blockEndTick
@@ -64,21 +73,33 @@ void PatternPlayer::advance(int numSamples, std::vector<PatternTriggerEvent>& ou
         if (eventAbsoluteTick >= blockEndTick)
             break;
 
-        const double samplesIntoBlock = (eventAbsoluteTick - blockStartTick) * spt;
-        const int offset =
-            std::clamp(static_cast<int>(std::llround(samplesIntoBlock)), 0, std::max(0, numSamples - 1));
-
         const auto& event = pattern.events[static_cast<size_t>(nextEventIndex)];
         const auto bank = event.bank();
         const auto padIndex = event.padIndexInBank();
-        if (bank && padIndex)
-            outEvents.push_back({*bank, *padIndex, offset, event.velocity});
+        if (bank && padIndex) {
+            outEvents.push_back({*bank, *padIndex, tickToOffset(eventAbsoluteTick), event.velocity, false});
+            if (event.lengthTicks > 0)
+                pendingNoteOffs.push_back({eventAbsoluteTick + event.lengthTicks, *bank, *padIndex});
+        }
 
         ++nextEventIndex;
         if (nextEventIndex >= static_cast<int>(pattern.events.size())) {
             nextEventIndex = 0;
             ++loopCount;
         }
+    }
+
+    // Fire (and drop) every pending note-off whose scheduled tick has now been reached, whether
+    // it was scheduled just above or many blocks/loops ago. Appended after this block's note-ons
+    // in outEvents -- see advance()'s doc comment on why that's fine (not globally tick-sorted).
+    for (size_t i = 0; i < pendingNoteOffs.size();) {
+        if (pendingNoteOffs[i].offAbsoluteTick >= blockEndTick) {
+            ++i;
+            continue;
+        }
+        outEvents.push_back(
+            {pendingNoteOffs[i].bank, pendingNoteOffs[i].padIndexInBank, tickToOffset(pendingNoteOffs[i].offAbsoluteTick), 0, true});
+        pendingNoteOffs.erase(pendingNoteOffs.begin() + static_cast<long>(i));
     }
 }
 
