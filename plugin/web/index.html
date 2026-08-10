@@ -14,20 +14,23 @@
       <svg viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
     </div>
     <div id="menu-dropdown">
+      <div class="menu-section-label">Bank</div>
       <button type="button" data-action="save-all">Save All Banks…</button>
       <button type="button" data-action="load-all">Load All Banks…</button>
       <button type="button" data-action="save-bank">Save This Bank…</button>
       <button type="button" data-action="load-bank">Load A Bank…</button>
       <button type="button" class="danger" data-action="clear-bank">Clear This Bank</button>
-      <button type="button" class="danger" data-action="clear-all">Clear All</button>
+      <button type="button" class="danger" data-action="clear-all">Clear All Banks</button>
       <hr />
-      <button type="button" data-action="toggle-sync-mode" id="toggle-sync-mode-btn">Go Offline…</button>
-      <button type="button" data-action="sync-to-card" id="sync-to-card-btn">Sync Mirror → Card…</button>
-      <hr />
+      <div class="menu-section-label">Pattern</div>
       <button type="button" data-action="open-patterns">Patterns…</button>
       <button type="button" data-action="export-all-patterns-midi">Export All Patterns (MIDI)…</button>
       <button type="button" data-action="load-all-patterns-midi">Load All Patterns (MIDI)…</button>
       <button type="button" class="danger" data-action="clear-all-patterns">Delete All Patterns</button>
+      <hr />
+      <button type="button" data-action="toggle-sync-mode" id="toggle-sync-mode-btn">Go Offline…</button>
+      <button type="button" data-action="sync-to-card" id="sync-to-card-btn">Sync Mirror → Card…</button>
+      <hr />
       <button type="button" data-action="open-theme-picker">Theme…</button>
     </div>
     <div id="mode-badge" title="Live: editing the connected SD card directly">LIVE</div>

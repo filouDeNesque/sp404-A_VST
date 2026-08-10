@@ -146,30 +146,40 @@ Les tests couvrent `core/` (parsing `PAD_INFO.BIN` et chunk `RLND`), voir
     qu'à corriger : pour importer le fichier `.wav` d'origine non modifié, glisser depuis le
     Finder plutôt que directement depuis la timeline Ableton (même contournement que pour
     Splice ci-dessus).
-11. Menu de gestion des banks (icône en haut à gauche, miroir de l'icône carte SD) :
-    Sauvegarder/Charger toutes les banks (zippe/restaure `SMPL/` en entier, voir
-    `sp404::saveAllBanksToZip`/`loadAllBanksFromZip`, `plugin/BankArchive.h`), Sauvegarder cette
-    bank/Charger une bank (archive d'une seule bank avec sa tranche de 384 octets de
-    `PAD_INFO.BIN` + ses samples sous des noms positionnels `pad01`..`pad12`, ce qui permet de
-    restaurer vers une bank différente de l'origine — dupliquer/réarranger des banks — sans
-    renommage manuel, voir `sp404::saveBankToZip`/`loadBankFromZip`), Vider cette bank/Vider tout
-    (`sp404::clearBank`/`clearAllBanks` — supprime les fichiers samples et remet `PadInfo` à
-    zéro), Export All Patterns (MIDI)… (bulk : exporte tous les slots de pattern occupés, sur les
-    10 banks, en un seul `.zip` de fichiers `.mid` nommés `<Banque><2 chiffres>.mid`, ex.
-    `A01.mid` — voir `sp404::exportAllPatternsToMidiZip`, `plugin/PatternArchive.h`, la version
-    "toutes les banks" du bouton "Export MIDI…" du panneau Patterns décrit plus bas), Load All
-    Patterns (MIDI)… (l'inverse : lit un `.zip` produit par Export All Patterns, importe chaque
-    entrée `<Banque><2 chiffres>.mid` reconnue sur son slot d'origine via
-    `sp404::importPatternFromMidi`/`writePattern` — voir `sp404::loadAllPatternsFromMidiZip`.
-    Validé *avant* de toucher la carte : si le zip ne contient aucune entrée reconnaissable,
-    rien n'est effacé et l'opération échoue proprement, comme `loadAllBanksFromZip`. Sinon,
-    **tous** les patterns existants sont d'abord effacés — `sp404::clearAllPatterns` — puis
-    remplacés par le contenu du zip, même logique "remplace entièrement, ne fusionne jamais" que
-    le reste des chargements de cet app ; un slot absent du zip finit donc vide, pas laissé tel
-    quel), Delete All Patterns (`sp404::clearAllPatterns`, `core/include/sp404/SdCard.h` —
-    supprime les 120 `PTNxxxxx.BIN` possibles, slots déjà vides silencieusement ignorés ;
-    contrepartie destructive d'Export All Patterns, même confirmation modale que Vider tout). Le
-    "Save As"/"Open" passe par un vrai sélecteur de fichier natif
+11. Menu de gestion (icône en haut à gauche, miroir de l'icône carte SD) : réorganisé
+    (2026-08-10) en sections **Bank** et **Pattern** avec des libellés de groupe non cliquables
+    (`.menu-section-label` dans `styles.css`), pour rester lisible maintenant que les deux
+    familles d'actions comptent chacune 4-6 boutons — les actions elles-mêmes (`data-action`) et
+    leur comportement sont inchangés, seul le regroupement visuel a bougé.
+    - **Bank** : Sauvegarder/Charger toutes les banks (zippe/restaure `SMPL/` en entier, voir
+      `sp404::saveAllBanksToZip`/`loadAllBanksFromZip`, `plugin/BankArchive.h`), Sauvegarder
+      cette bank/Charger une bank (archive d'une seule bank avec sa tranche de 384 octets de
+      `PAD_INFO.BIN` + ses samples sous des noms positionnels `pad01`..`pad12`, ce qui permet de
+      restaurer vers une bank différente de l'origine — dupliquer/réarranger des banks — sans
+      renommage manuel, voir `sp404::saveBankToZip`/`loadBankFromZip`), Vider cette bank/Vider
+      toutes les banks (`sp404::clearBank`/`clearAllBanks` — supprime les fichiers samples et
+      remet `PadInfo` à zéro).
+    - **Pattern** : Patterns… (ouvre le panneau détaillé au niveau 15 plus bas), Export All
+      Patterns (MIDI)… (bulk : exporte tous les slots de pattern occupés, sur les 10 banks, en un
+      seul `.zip` de fichiers `.mid` nommés `<Banque><2 chiffres>.mid`, ex. `A01.mid` — voir
+      `sp404::exportAllPatternsToMidiZip`, `plugin/PatternArchive.h`, la version "toutes les
+      banks" du bouton "Export MIDI…" du panneau Patterns), Load All Patterns (MIDI)… (l'inverse
+      : lit un `.zip` produit par Export All Patterns, importe chaque entrée `<Banque><2
+      chiffres>.mid` reconnue sur son slot d'origine via `sp404::importPatternFromMidi`/
+      `writePattern` — voir `sp404::loadAllPatternsFromMidiZip`. Validé *avant* de toucher la
+      carte : si le zip ne contient aucune entrée reconnaissable, rien n'est effacé et
+      l'opération échoue proprement, comme `loadAllBanksFromZip`. Sinon, **tous** les patterns
+      existants sont d'abord effacés — `sp404::clearAllPatterns` — puis remplacés par le contenu
+      du zip, même logique "remplace entièrement, ne fusionne jamais" que le reste des
+      chargements de cet app ; un slot absent du zip finit donc vide, pas laissé tel quel),
+      Delete All Patterns (`sp404::clearAllPatterns`, `core/include/sp404/SdCard.h` — supprime
+      les 120 `PTNxxxxx.BIN` possibles, slots déjà vides silencieusement ignorés ; contrepartie
+      destructive d'Export All Patterns, même confirmation modale que Vider toutes les banks).
+    - En dehors de ces deux sections (le menu ne les force pas dans un groupe, ni Bank ni
+      Pattern à proprement parler) : le bascule offline/live et Sync Mirror → Card (item 12
+      ci-dessous), puis Theme… (sélecteur de thème, item 14 plus bas).
+
+    Le "Save As"/"Open" passe par un vrai sélecteur de fichier natif
     (`juce::FileChooser`, async — seul dialogue natif de l'app, pas d'équivalent web pour un
     Save As vers un emplacement arbitraire) ; toute action destructive (vider, charger qui
     remplace) est confirmée par une modale **dans la WebView** (pas de dialogue système) pour

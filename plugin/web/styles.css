@@ -336,6 +336,16 @@
     #menu-dropdown button.danger { color: #ff8a6a; }
     #menu-dropdown button.danger:hover { background: rgba(255, 106, 19, 0.15); }
     #menu-dropdown hr { border: none; border-top: 1px solid var(--border); margin: 3px 2px; }
+    /* Non-interactive group heading (e.g. "Bank"/"Pattern") above a run of related menu buttons
+       -- purely visual grouping, no data-action of its own. */
+    .menu-section-label {
+      font-size: 8px;
+      font-weight: bold;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: var(--text-dim);
+      padding: 4px 6px 1px;
+    }
     /* Always-visible mode indicator, not directly clickable (the toggle lives in the menu) so a
        stray click can't switch modes -- entering/leaving offline mode is deliberate, matching
        how "Synchroniser" (also in the menu) is a deliberate, confirmed action. */
