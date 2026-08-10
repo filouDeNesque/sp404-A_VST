@@ -240,8 +240,7 @@ présents sur la carte (banques C, D et I respectivement, qui contiennent bien d
 1. ✅ Chunk WAV `RLND` : vérifié (2026-08-10), voir la section dédiée plus haut.
 2. Voir la section "Ce qui reste ouvert" ci-dessus pour les inconnues restantes sur le format
    `PTN`.
-3. Un test bout-en-bout **sur le vrai matériel** (importer un sample via le plugin, puis vérifier
-   sur le SP-404SX/A lui-même qu'il est bien reconnu sur le pad, pas seulement que les octets du
-   fichier correspondent à ceux d'un fichier déjà accepté par l'appareil) reste à faire par
-   l'utilisateur — hors de portée de cet environnement (pas de façon d'actionner l'écran/les
-   boutons physiques de l'appareil depuis ici).
+3. ✅ Test bout-en-bout **sur le vrai matériel** (2026-08-10, confirmé par l'utilisateur) :
+   pad A2 réimporté via le plugin après le correctif, chargé sans erreur sur un SP-404SX physique
+   — là où l'ancien fichier (écrit avant le correctif, sans chunk `RLND`) échouait avec une erreur
+   à l'écran.

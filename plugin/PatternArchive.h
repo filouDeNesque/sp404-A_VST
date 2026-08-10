@@ -56,4 +56,19 @@ struct LoadPatternResult {
 LoadPatternResult loadPatternFromZip(const std::filesystem::path& sdRoot, const juce::File& zipFile,
                                       char targetBank, int targetIndexInBank);
 
+struct ExportAllPatternsResult {
+    bool ok = false;
+    int exportedCount = 0;
+};
+
+// Exports every occupied pattern slot (across all 10 banks x Bank::padCount pads) as a Standard
+// MIDI File, bundled into a single zip -- the bulk counterpart of the per-slot "Export MIDI..."
+// button (see sp404::exportPatternToMidi, plugin/PatternMidi.h). Each entry is named
+// "<Bank><2-digit pad>.mid" (e.g. "A01.mid"), one per slot that actually has a pattern recorded
+// -- empty slots are silently skipped, not an error. `ok` is false only if the zip itself
+// couldn't be written; exportedCount == 0 (a card with no patterns at all) still leaves ok true
+// (an empty zip), so the caller can tell "nothing to export" apart from "failed to write".
+ExportAllPatternsResult exportAllPatternsToMidiZip(const std::filesystem::path& sdRoot,
+                                                    const juce::File& zipDestination);
+
 } // namespace sp404

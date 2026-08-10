@@ -957,6 +957,18 @@
             result && result.ok ? "Mirror synced to the connected card." : "Sync failed (is a card connected?).";
         },
         "open-patterns": () => openPatternsPanel(),
+        "export-all-patterns-midi": async () => {
+          const picked = await window.getNativeFunction("pickZipToSave")("SP404_AllPatterns_MIDI.zip");
+          if (picked.cancelled) return;
+          const result = await window.getNativeFunction("exportAllPatternsMidi")(picked.path);
+          if (!result || !result.ok) {
+            statusEl.textContent = "Failed to export patterns.";
+          } else if (result.exportedCount === 0) {
+            statusEl.textContent = "No patterns found on the card -- wrote an empty zip.";
+          } else {
+            statusEl.textContent = `Exported ${result.exportedCount} pattern(s) as MIDI to ${picked.path}.`;
+          }
+        },
         "open-theme-picker": () => openThemePicker(),
       };
 

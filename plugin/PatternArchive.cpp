@@ -3,6 +3,7 @@
 #include <array>
 #include <utility>
 
+#include "PatternMidi.h"
 #include "sp404/Pattern.h"
 #include "sp404/SdCard.h"
 
@@ -220,6 +221,46 @@ LoadPatternResult loadPatternFromZip(const std::filesystem::path& sdRoot, const 
 
     result.touchedBanks.insert(targetBank);
     result.ok = true;
+    return result;
+}
+
+ExportAllPatternsResult exportAllPatternsToMidiZip(const std::filesystem::path& sdRoot,
+                                                    const juce::File& zipDestination) {
+    ExportAllPatternsResult result;
+
+    // MIDI files are written here (exportPatternToMidi only knows how to write to a real file,
+    // there's no in-memory variant) and added to the zip by path -- juce::ZipFile::Builder reads
+    // from them lazily at writeToStream() time below, so they must stay on disk until then.
+    // Cleaned up unconditionally afterwards, success or failure.
+    const juce::File tempDir =
+        juce::File::getSpecialLocation(juce::File::tempDirectory)
+            .getChildFile("sp404_pattern_export_" + juce::String::toHexString(juce::Random::getSystemRandom().nextInt64()));
+    tempDir.createDirectory();
+
+    juce::ZipFile::Builder builder;
+    for (char bank = 'A'; bank <= 'J'; ++bank) {
+        for (int indexInBank = 1; indexInBank <= Bank::padCount; ++indexInBank) {
+            const auto pattern = readPattern(patternSlotPath(sdRoot, bank, indexInBank));
+            if (!pattern)
+                continue;
+
+            const juce::String entryName = padEntryStem(bank, indexInBank) + ".mid";
+            const juce::File tempFile = tempDir.getChildFile(entryName);
+            if (!exportPatternToMidi(*pattern, tempFile))
+                continue;
+
+            builder.addFile(tempFile, 6, entryName);
+            ++result.exportedCount;
+        }
+    }
+
+    zipDestination.deleteFile();
+    {
+        std::unique_ptr<juce::FileOutputStream> out = zipDestination.createOutputStream();
+        result.ok = out != nullptr && builder.writeToStream(*out, nullptr);
+    }
+
+    tempDir.deleteRecursively();
     return result;
 }
 

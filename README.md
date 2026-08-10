@@ -141,7 +141,11 @@ Les tests couvrent `core/` (parsing `PAD_INFO.BIN` et chunk `RLND`), voir
     restaurer vers une bank différente de l'origine — dupliquer/réarranger des banks — sans
     renommage manuel, voir `sp404::saveBankToZip`/`loadBankFromZip`), Vider cette bank/Vider tout
     (`sp404::clearBank`/`clearAllBanks` — supprime les fichiers samples et remet `PadInfo` à
-    zéro). Le "Save As"/"Open" passe par un vrai sélecteur de fichier natif
+    zéro), Export All Patterns (MIDI)… (bulk : exporte tous les slots de pattern occupés, sur les
+    10 banks, en un seul `.zip` de fichiers `.mid` nommés `<Banque><2 chiffres>.mid`, ex.
+    `A01.mid` — voir `sp404::exportAllPatternsToMidiZip`, `plugin/PatternArchive.h`, la version
+    "toutes les banks" du bouton "Export MIDI…" du panneau Patterns décrit plus bas). Le "Save
+    As"/"Open" passe par un vrai sélecteur de fichier natif
     (`juce::FileChooser`, async — seul dialogue natif de l'app, pas d'équivalent web pour un
     Save As vers un emplacement arbitraire) ; toute action destructive (vider, charger qui
     remplace) est confirmée par une modale **dans la WebView** (pas de dialogue système) pour
@@ -360,11 +364,11 @@ docs/     spécification du format de carte SD SP-404SX et ses sources.
   signal de test → structure de fichier correcte (RLND/device/SampleIndex/`data` aux bons
   offsets) → relu avec succès par le lecteur WAV natif de JUCE lui-même (confirme qu'ajouter ce
   chunk custom ne casse pas la compatibilité WAV standard) → contenu audio identique à l'original
-  à la quantification 16-bit près. 66/66 `ctest`, build propre, 3/3 `auval`. **Non fait** : un
-  test bout-en-bout sur le **vrai matériel** (importer un sample via le plugin puis confirmer sur
-  l'appareil lui-même qu'il est accepté sur un pad) reste à faire par l'utilisateur — hors de
-  portée de cet environnement, qui n'a aucun moyen d'actionner l'écran/les boutons physiques du
-  SP-404SX/A.
+  à la quantification 16-bit près. 66/66 `ctest`, build propre, 3/3 `auval`. ✅ **Testé sur le vrai
+  matériel (2026-08-10, confirmé par l'utilisateur)** : un sample réimporté via le plugin sur le
+  pad A2 (qui était auparavant en échec, écrit avant ce correctif) se charge maintenant
+  correctement sur un SP-404SX physique, là où l'ancien fichier échouait avec une erreur à
+  l'écran.
 - ✅ Persistance d'état dans la session DAW (`PluginProcessor::getStateInformation`/
   `setStateInformation`, XML via `AudioProcessor::copyXmlToBinary`/`getXmlFromBinary` — la
   convention JUCE standard pour ça, plutôt que le JSON déjà utilisé ailleurs dans ce projet pour
@@ -471,6 +475,19 @@ docs/     spécification du format de carte SD SP-404SX et ses sources.
     marqueur de fin de piste explicite (`juce::MidiMessage::endOfTrack()`, positionné au vrai
     nombre de mesures) préserve le silence de fin d'un pattern à l'export/import, qui serait
     sinon perdu (aucune note n'ancre sa position).
+  - ✅ **Export MIDI en masse** (2026-08-10, `sp404::exportAllPatternsToMidiZip`,
+    `plugin/PatternArchive.h`/`.cpp`, menu "Export All Patterns (MIDI)…" — voir item 11 plus
+    haut) : bulk de l'export MIDI par slot ci-dessus, plutôt qu'un nouveau mécanisme — parcourt
+    les 120 slots possibles (10 banks × 12), réutilise `exportPatternToMidi` pour chaque slot
+    occupé (silencieusement ignoré si vide, pas une erreur) et bundle le tout dans un seul
+    `.zip` (`juce::ZipFile::Builder`, entrées `<Banque><2 chiffres>.mid`). Les `.mid`
+    intermédiaires sont écrits dans un dossier temporaire (l'API `exportPatternToMidi` existante
+    n'a pas de variante en mémoire) puis supprimés une fois le zip écrit, succès ou échec.
+    Vérifié via un harnais offline jetable **contre la carte réelle reconnectée** : exporte
+    exactement les 3 patterns réels (`A01.mid`/`A09.mid`/`A12.mid`, correspondant aux 3 fichiers
+    `PTN` déjà vérifiés dans `docs/sp404sx-format.md`), zéro faux positif/négatif sur les 117
+    slots vides restants. 66/66 `ctest` (inchangé — logique de bundle simple au-dessus d'une
+    fonction déjà testée, pas de nouveau test dédié), build propre, 3/3 `auval`.
   - 🟡 Triggering d'un pattern entier depuis le DAW, synchronisé tempo/transport hôte — fait
     partiellement, voir le détail complet ci-dessous.
 
