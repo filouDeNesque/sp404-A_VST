@@ -758,6 +758,21 @@ void handleClearAllBanks(PluginProcessor& processor, const juce::Array<juce::var
     respondOk(ok, completion);
 }
 
+// Pattern counterpart of handleClearAllBanks above -- see sp404::clearAllPatterns.
+void handleClearAllPatterns(PluginProcessor& processor, const juce::Array<juce::var>&,
+                             juce::WebBrowserComponent::NativeFunctionCompletion completion) {
+    bool ok = false;
+    if (const auto cardRoot = processor.resolveCardRoot()) {
+        try {
+            clearAllPatterns(*cardRoot);
+            ok = true;
+        } catch (const std::exception&) {
+            ok = false;
+        }
+    }
+    respondOk(ok, completion);
+}
+
 // --- Offline/live sync mode -----------------------------------------------------------------
 
 // Whether the mirror itself already has a valid PAD_INFO.BIN -- independent of whether offline
@@ -1273,6 +1288,11 @@ juce::WebBrowserComponent::Options makeWebViewOptions(PluginProcessor& processor
                              [&processor](const juce::Array<juce::var>& args,
                                           juce::WebBrowserComponent::NativeFunctionCompletion completion) {
                                  handleClearAllBanks(processor, args, completion);
+                             })
+        .withNativeFunction("clearAllPatterns",
+                             [&processor](const juce::Array<juce::var>& args,
+                                          juce::WebBrowserComponent::NativeFunctionCompletion completion) {
+                                 handleClearAllPatterns(processor, args, completion);
                              })
         .withNativeFunction("getSyncMode",
                              [&processor](const juce::Array<juce::var>& args,

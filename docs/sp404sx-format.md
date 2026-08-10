@@ -232,8 +232,25 @@ présents sur la carte (banques C, D et I respectivement, qui contiennent bien d
     (C, D, I) — cohérent avec l'hypothèse que le slot de stockage du pattern et les pads qu'il
     joue sont deux espaces d'adressage indépendants (le slot suit la grille physique des pads
     de la banque A-J habituelle, le contenu peut référencer n'importe quelle banque).
-- `SMPL/STPINFO.BIN` (124 octets sur la carte réelle) reste sans documentation trouvée et n'a
-  pas été analysé.
+- `SMPL/STPINFO.BIN` (124 octets sur la carte réelle) reste sans documentation trouvée. Un premier
+  dump (2026-08-10, suite à la question "y a-t-il un équivalent RLND pour les patterns ?") montre
+  un fichier presque entièrement à zéro avec 4 octets non nuls (offsets 15, 107, 111, 119 —
+  valeurs `01`, `01`, `0x87`, `01`) sans corrélation évidente trouvée avec les 3 slots de pattern
+  occupés (1, 9, 12 — que ce soit en position d'octet, en position de bit dans un bitmap, ou toute
+  autre disposition simple testée). Hypothèse non retenue faute de preuve : plutôt qu'un index de
+  présence par slot (l'équivalent RLND supposé), ce fichier pourrait tout aussi bien concerner un
+  état global du séquenceur pas-à-pas (son nom suggère "STep..."), sans lien avec quels slots
+  contiennent un pattern. **Contrairement au chunk RLND**, dont le rôle a été confirmé par un test
+  réel (fichier sans RLND → refusé par le SP-404SX), aucun test réel équivalent n'a été fait pour
+  `STPINFO.BIN` : `writePattern`/`sp404::encode(Pattern)` n'y touchent pas du tout aujourd'hui, et
+  on ne sait pas si c'est un problème. Le format `PTN` lui-même, en revanche, **a** son propre
+  octet de signature (pied de fichier, offset 1 = `140` constant sur les 3 fichiers réels — voir
+  plus haut) et notre `sp404::encode(Pattern)` l'écrit déjà correctement (vérifié par
+  `core/tests/PatternTests.cpp` contre les 3 fixtures réelles) : ce n'est donc pas là l'équivalent
+  manquant du bug `RLND`, si un tel équivalent existe. **À vérifier par l'utilisateur** : importer
+  un pattern MIDI sur un slot vide via le plugin (bouton "Import MIDI…" du panneau Patterns) et
+  confirmer qu'il apparaît/se lit correctement sur le SP-404SX physique — le seul moyen fiable de
+  trancher, comme ça l'a été pour `RLND`.
 
 ## Points restant à vérifier
 

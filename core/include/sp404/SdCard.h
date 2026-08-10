@@ -84,6 +84,11 @@ std::filesystem::path patternSlotPath(const std::filesystem::path& sdRoot, char 
 // range.
 void clearPatternSlot(const std::filesystem::path& sdRoot, char bankName, int indexInBank);
 
+// clearPatternSlot for every one of the 120 possible slots (10 banks x Bank::padCount) -- resets
+// every pattern on the card to empty, mirroring clearAllBanks for samples below. Slots that were
+// already empty are silently skipped, same as clearPatternSlot itself.
+void clearAllPatterns(const std::filesystem::path& sdRoot);
+
 // Copies one pattern slot's raw bytes onto another slot of the same card, overwriting whatever
 // was there. A pattern's bytes hard-code which bank/pad each event *plays* (see
 // docs/sp404sx-format.md), not which slot it's filed under, so copying to a different slot

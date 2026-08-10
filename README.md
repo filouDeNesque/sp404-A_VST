@@ -144,7 +144,10 @@ Les tests couvrent `core/` (parsing `PAD_INFO.BIN` et chunk `RLND`), voir
     zéro), Export All Patterns (MIDI)… (bulk : exporte tous les slots de pattern occupés, sur les
     10 banks, en un seul `.zip` de fichiers `.mid` nommés `<Banque><2 chiffres>.mid`, ex.
     `A01.mid` — voir `sp404::exportAllPatternsToMidiZip`, `plugin/PatternArchive.h`, la version
-    "toutes les banks" du bouton "Export MIDI…" du panneau Patterns décrit plus bas). Le "Save
+    "toutes les banks" du bouton "Export MIDI…" du panneau Patterns décrit plus bas), Delete All
+    Patterns (`sp404::clearAllPatterns`, `core/include/sp404/SdCard.h` — supprime les 120
+    `PTNxxxxx.BIN` possibles, slots déjà vides silencieusement ignorés ; contrepartie destructive
+    d'Export All Patterns, même confirmation modale que Vider tout). Le "Save
     As"/"Open" passe par un vrai sélecteur de fichier natif
     (`juce::FileChooser`, async — seul dialogue natif de l'app, pas d'équivalent web pour un
     Save As vers un emplacement arbitraire) ; toute action destructive (vider, charger qui
@@ -369,6 +372,17 @@ docs/     spécification du format de carte SD SP-404SX et ses sources.
   pad A2 (qui était auparavant en échec, écrit avant ce correctif) se charge maintenant
   correctement sur un SP-404SX physique, là où l'ancien fichier échouait avec une erreur à
   l'écran.
+- 🟡 **Équivalent RLND pour les patterns ?** (question posée le 2026-08-10) : le format `PTN`
+  a bien sa propre "signature" (pied de fichier, octet 1 = `140` constant — voir la section
+  format ci-dessous) et `sp404::encode(Pattern)`/`writePattern` l'écrivent déjà correctement
+  (vérifié contre les 3 patterns réels), donc **pas** de lacune connue équivalente au bug `RLND`
+  à ce niveau. Reste un fichier non analysé, `SMPL/STPINFO.BIN` (124 octets), que `writePattern`
+  n'écrit/ne met jamais à jour — un premier dump ne montre aucune corrélation évidente avec les
+  slots de pattern occupés, mais rien ne prouve non plus qu'il n'a aucun rôle (voir
+  `docs/sp404sx-format.md`, section `STPINFO.BIN`, pour le détail de ce qui a été essayé).
+  **Non fait** : trancher si importer un pattern MIDI sur un nouveau slot via le plugin (bouton
+  "Import MIDI…") est bien reconnu par un SP-404SX physique sans toucher `STPINFO.BIN` — seul un
+  test sur le vrai matériel peut le confirmer, comme ça l'a été pour `RLND`.
 - ✅ Persistance d'état dans la session DAW (`PluginProcessor::getStateInformation`/
   `setStateInformation`, XML via `AudioProcessor::copyXmlToBinary`/`getXmlFromBinary` — la
   convention JUCE standard pour ça, plutôt que le JSON déjà utilisé ailleurs dans ce projet pour

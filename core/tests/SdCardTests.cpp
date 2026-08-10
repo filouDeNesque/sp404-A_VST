@@ -2,6 +2,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
+#include <utility>
 #include <vector>
 
 #include <catch2/catch_test_macros.hpp>
@@ -159,6 +160,27 @@ TEST_CASE("clearPatternSlot deletes the PTNxxxxx.BIN file, and is a no-op if alr
     sp404::clearPatternSlot(root, 'A', 1); // already gone -- must not throw
 
     CHECK_THROWS_AS(sp404::clearPatternSlot(root, 'A', 13), std::invalid_argument);
+
+    std::filesystem::remove_all(root);
+}
+
+TEST_CASE("clearAllPatterns deletes every PTNxxxxx.BIN file on the card", "[SdCard]") {
+    const auto root = makeSyntheticCard();
+
+    const std::vector<std::pair<char, int>> occupied = {{'A', 1}, {'C', 6}, {'J', 12}};
+    for (const auto& [bank, indexInBank] : occupied) {
+        const auto path = sp404::patternSlotPath(root, bank, indexInBank);
+        std::filesystem::create_directories(path.parent_path());
+        std::ofstream out(path, std::ios::binary);
+        out.write("pattern", 7);
+    }
+    for (const auto& [bank, indexInBank] : occupied)
+        REQUIRE(std::filesystem::exists(sp404::patternSlotPath(root, bank, indexInBank)));
+
+    sp404::clearAllPatterns(root);
+
+    for (const auto& [bank, indexInBank] : occupied)
+        CHECK_FALSE(std::filesystem::exists(sp404::patternSlotPath(root, bank, indexInBank)));
 
     std::filesystem::remove_all(root);
 }

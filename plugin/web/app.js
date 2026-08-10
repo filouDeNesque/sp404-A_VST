@@ -957,6 +957,14 @@
             result && result.ok ? "Mirror synced to the connected card." : "Sync failed (is a card connected?).";
         },
         "open-patterns": () => openPatternsPanel(),
+        "clear-all-patterns": async () => {
+          const confirmed = await showConfirm(
+            "This deletes every pattern on the card (all 120 slots). This cannot be undone. Continue?"
+          );
+          if (!confirmed) return;
+          const result = await window.getNativeFunction("clearAllPatterns")();
+          statusEl.textContent = result && result.ok ? "All patterns deleted." : "Failed to delete all patterns.";
+        },
         "export-all-patterns-midi": async () => {
           const picked = await window.getNativeFunction("pickZipToSave")("SP404_AllPatterns_MIDI.zip");
           if (picked.cancelled) return;

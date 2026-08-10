@@ -160,6 +160,12 @@ void clearPatternSlot(const std::filesystem::path& sdRoot, char bankName, int in
     std::filesystem::remove(patternSlotPath(sdRoot, bankName, indexInBank), removeEc);
 }
 
+void clearAllPatterns(const std::filesystem::path& sdRoot) {
+    for (char bankName = 'A'; bankName <= 'J'; ++bankName)
+        for (int indexInBank = 1; indexInBank <= Bank::padCount; ++indexInBank)
+            clearPatternSlot(sdRoot, bankName, indexInBank);
+}
+
 bool copyPatternSlot(const std::filesystem::path& sdRoot, char srcBank, int srcIndexInBank, char destBank,
                       int destIndexInBank) {
     checkPadRange(srcBank, srcIndexInBank, "copyPatternSlot");
