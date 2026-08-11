@@ -873,6 +873,32 @@ void handleClearAllPatterns(PluginProcessor& processor, const juce::Array<juce::
     respondOk(ok, completion);
 }
 
+// Fixes pads whose sample was imported/rewritten before the TIME/BPM crash fix (origTempo=
+// userTempo=0 -- see sp404::repairZeroTempoPads' doc comment and docs/sp404sx-format.md).
+// Metadata-only (no zip/large file work), so this runs synchronously rather than through
+// BackgroundOperation like the save/load/sync actions above. Response includes repairedCount so
+// the UI can tell the user how many pads were fixed. Operates on whichever root is currently
+// active (offline mirror or a connected real card, via resolveCardRoot()) -- repairing the mirror
+// then hitting "Sync Mirror -> Card" is the intended way to fix pads that were imported while
+// offline, without having to re-import every sample.
+void handleRepairZeroTempoPads(PluginProcessor& processor, const juce::Array<juce::var>&,
+                                juce::WebBrowserComponent::NativeFunctionCompletion completion) {
+    bool ok = false;
+    int repairedCount = 0;
+    if (const auto cardRoot = processor.resolveCardRoot()) {
+        try {
+            repairedCount = repairZeroTempoPads(*cardRoot);
+            ok = true;
+        } catch (const std::exception&) {
+            ok = false;
+        }
+    }
+    auto* response = new juce::DynamicObject();
+    response->setProperty("ok", ok);
+    response->setProperty("repairedCount", repairedCount);
+    completion(juce::var(response));
+}
+
 // --- Offline/live sync mode -----------------------------------------------------------------
 
 // Whether the mirror itself already has a valid PAD_INFO.BIN -- independent of whether offline
@@ -1422,6 +1448,11 @@ juce::WebBrowserComponent::Options makeWebViewOptions(PluginProcessor& processor
                              [&processor](const juce::Array<juce::var>& args,
                                           juce::WebBrowserComponent::NativeFunctionCompletion completion) {
                                  handleClearAllPatterns(processor, args, completion);
+                             })
+        .withNativeFunction("repairZeroTempoPads",
+                             [&processor](const juce::Array<juce::var>& args,
+                                          juce::WebBrowserComponent::NativeFunctionCompletion completion) {
+                                 handleRepairZeroTempoPads(processor, args, completion);
                              })
         .withNativeFunction("getSyncMode",
                              [&processor](const juce::Array<juce::var>& args,

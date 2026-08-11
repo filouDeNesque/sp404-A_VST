@@ -319,6 +319,64 @@ TEST_CASE("replacePadSample(resetPlaybackDefaults=false) preserves volume/gate",
     std::filesystem::remove_all(root);
 }
 
+TEST_CASE("repairZeroTempoPads fixes only occupied pads with origTempo=userTempo=0", "[SdCard]") {
+    const auto root = makeSyntheticCard();
+
+    // Pad C5: occupied (fake sample file present) but stuck at origTempo=userTempo=0 -- as if
+    // written by replacePadSample before the TIME/BPM crash fix. Must be repaired.
+    {
+        sp404::PadInfo info;
+        info.origTempo = 0;
+        info.userTempo = 0;
+        info.volume = 77; // must survive the repair untouched
+        sp404::savePadInfo(root, 'C', 5, info);
+        std::ofstream out(sp404::samplePath(root, 'C', 5, sp404::PadInfo::Format::Wave), std::ios::binary);
+        out << "fake wav data";
+    }
+
+    // Pad C6: occupied with a legitimate non-zero tempo already -- must be left alone.
+    {
+        sp404::PadInfo info;
+        info.origTempo = 1064;
+        info.userTempo = 1064;
+        sp404::savePadInfo(root, 'C', 6, info);
+        std::ofstream out(sp404::samplePath(root, 'C', 6, sp404::PadInfo::Format::Wave), std::ios::binary);
+        out << "fake wav data";
+    }
+
+    // Pad C7: origTempo=userTempo=0 but no sample file (a genuinely empty pad) -- must be left
+    // alone, since a never-used pad legitimately has all-zero fields.
+    {
+        sp404::PadInfo info;
+        info.origTempo = 0;
+        info.userTempo = 0;
+        sp404::savePadInfo(root, 'C', 7, info);
+    }
+
+    const int repaired = sp404::repairZeroTempoPads(root);
+    CHECK(repaired == 1);
+
+    const auto card = sp404::SdCard::load(root);
+    const auto& c5 = card.banks()[2].pads[4].info;
+    CHECK(c5.origTempo != 0);
+    CHECK(c5.userTempo != 0);
+    CHECK(c5.origTempo == c5.userTempo);
+    CHECK(c5.volume == 77); // untouched aside from the tempo fields
+
+    const auto& c6 = card.banks()[2].pads[5].info;
+    CHECK(c6.origTempo == 1064); // left alone, already non-zero
+    CHECK(c6.userTempo == 1064);
+
+    const auto& c7 = card.banks()[2].pads[6].info;
+    CHECK(c7.origTempo == 0); // left alone, no sample file
+    CHECK(c7.userTempo == 0);
+
+    // Running it again finds nothing left to repair.
+    CHECK(sp404::repairZeroTempoPads(root) == 0);
+
+    std::filesystem::remove_all(root);
+}
+
 TEST_CASE("replacePadSample removes a stale sample file in the other extension", "[SdCard]") {
     const auto root = makeSyntheticCard();
 

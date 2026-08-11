@@ -388,6 +388,24 @@ docs/     spécification du format de carte SD SP-404SX et ses sources.
   `core/tests/SdCardTests.cpp` (vérifie `origTempo`/`userTempo != 0` après import). Détail complet
   dans `docs/sp404sx-format.md`. **Non testé sur vrai hardware** : hypothèse forte mais pas encore
   confirmée par un essai réel du bouton TIME/BPM sur un pad importé après ce correctif.
+  - **Nouveau : "Repair Pad Tempo (fix TIME/BPM crash)…"** (menu, section Bank) — le correctif
+    ci-dessus ne s'applique qu'aux *futurs* imports ; les pads déjà chargés avant ce correctif
+    (notamment dans le miroir offline, où l'utilisateur avait déjà glissé des samples avant de
+    savoir que `origTempo=0` posait problème) restaient bloqués à `origTempo=userTempo=0` sans
+    qu'on ait besoin de tout réimporter. `sp404::repairZeroTempoPads` (`core/include/sp404/
+    SdCard.h`/`.cpp`) scanne les 120 pads et corrige uniquement ceux qui ont *à la fois* un
+    fichier son présent et `origTempo==userTempo==0` (un pad vide avec ces valeurs, ou un pad déjà
+    correct, n'est jamais touché) — pure réparation de métadonnées, ne touche ni au fichier audio
+    ni à `volume`/`gate`/`loop`/`reverse`/`lofi`/`tempoMode`. Opère sur la racine active
+    (`PluginProcessor::resolveCardRoot()` — miroir offline ou carte connectée selon le mode), donc
+    le flux prévu est : ouvrir ce menu une fois (répare le miroir), puis "Sync Mirror → Card…"
+    (déjà existant) pour pousser la correction sur la vraie carte, sans avoir à refaire aucun
+    glisser-déposer. Réponse `{ok, repairedCount}` affichée dans la barre de statut. Handler
+    synchrone (`handleRepairZeroTempoPads`, `plugin/WebUIBridge.cpp`) plutôt que via
+    `BackgroundOperation` : un simple scan de métadonnées sur au plus 120 pads, pas de zip/gros
+    fichier à traiter. Test dédié dans `core/tests/SdCardTests.cpp` (pad occupé à tempo zéro
+    réparé ; pad occupé à tempo déjà valide laissé intact ; pad vide à tempo zéro laissé intact ;
+    un second passage ne trouve plus rien à réparer).
 - Détection de carte SD sur Windows/Linux si le projet s'étend au-delà de macOS (pour l'instant
   `findConnectedCardRoot()` ne scanne que `/Volumes`).
 - ✅ **Barre de progression étape par étape pour Save/Load/Sync** (2026-08-10, sur demande) :

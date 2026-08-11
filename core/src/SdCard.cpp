@@ -261,6 +261,27 @@ void replacePadSample(const std::filesystem::path& sdRoot, char bankName, int in
     savePadInfo(sdRoot, bankName, indexInBank, updated);
 }
 
+int repairZeroTempoPads(const std::filesystem::path& sdRoot) {
+    const auto card = SdCard::load(sdRoot);
+
+    int repaired = 0;
+    for (const auto& bank : card.banks()) {
+        for (const auto& pad : bank.pads) {
+            if (!pad.samplePath)
+                continue;
+            if (pad.info.origTempo != 0 || pad.info.userTempo != 0)
+                continue;
+
+            PadInfo updated = pad.info;
+            updated.origTempo = kDefaultTempoTenths;
+            updated.userTempo = kDefaultTempoTenths;
+            savePadInfo(sdRoot, pad.bank, pad.indexInBank, updated);
+            ++repaired;
+        }
+    }
+    return repaired;
+}
+
 void clearPad(const std::filesystem::path& sdRoot, char bankName, int indexInBank) {
     checkPadRange(bankName, indexInBank, "clearPad");
 

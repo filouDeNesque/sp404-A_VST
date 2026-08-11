@@ -150,6 +150,12 @@ exacte n'a pas d'importance tant que `tempoMode` reste `Off`) au lieu de 0 à ch
 son comportement sur un pad réel, et le symptôme exact rapporté) mais pas encore confirmée par un
 test réel du bouton TIME/BPM sur un pad importé après ce correctif.
 
+Ce correctif ne s'applique qu'aux futurs imports. Pour les pads déjà écrits avant (notamment dans
+le miroir offline), `sp404::repairZeroTempoPads` (`core/include/sp404/SdCard.h`/`.cpp`, menu
+"Repair Pad Tempo (fix TIME/BPM crash)…") corrige en place, sans réimporter, tout pad qui a à la
+fois un fichier son présent et `origTempo==userTempo==0` — voir le bullet Roadmap correspondant
+dans `README.md` pour le détail.
+
 ## Taux d'échantillonnage natif (vérifié 2026-08-09)
 
 Lecture brute de l'en-tête `fmt ` de `SMPL/A0000001.WAV` sur la vraie carte : **44100 Hz,

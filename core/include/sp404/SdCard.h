@@ -125,6 +125,17 @@ bool copyPatternSlot(const std::filesystem::path& sdRoot, char srcBank, int srcI
 void replacePadSample(const std::filesystem::path& sdRoot, char bankName, int indexInBank,
                        const std::vector<std::byte>& wavBytes, bool resetPlaybackDefaults);
 
+// Repairs pads whose sample was written before the TIME/BPM crash fix (see replacePadSample's doc
+// comment above and docs/sp404sx-format.md): origTempo=userTempo=0 with a sample file present.
+// Only touches such pads -- an empty pad (no sample file) legitimately has origTempo=0, same as a
+// pad some other tool wrote with a deliberate origTempo=0, so this never touches a pad that isn't
+// both occupied and exactly zero on both tempo fields. Sets origTempo/userTempo to the same
+// non-zero fallback replacePadSample now uses (kDefaultTempoTenths, 120 BPM in SdCard.cpp);
+// tempoMode/volume/gate/loop/reverse/lofi and the sample file itself are untouched -- this is a
+// metadata-only repair, not a re-import. Returns the number of pads repaired (0 if none needed
+// it). Throws std::runtime_error if sdRoot has no valid PAD_INFO.BIN (same as SdCard::load).
+int repairZeroTempoPads(const std::filesystem::path& sdRoot);
+
 // Deletes a pad's sample file(s) (.WAV and/or .AIF, whichever exist) and resets its PAD_INFO.BIN
 // record to all-zero bytes. Note "has a sample" is determined by SdCard::load()/findSampleFile()
 // purely from file existence, not from any PadInfo field -- so the file deletion is what actually

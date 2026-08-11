@@ -979,6 +979,20 @@
           statusEl.textContent = result && result.ok ? "All banks cleared." : "Failed to clear all banks.";
           if (result && result.ok) refreshAfterFileChange(currentBank());
         },
+        "repair-zero-tempo-pads": async () => {
+          const result = await window.getNativeFunction("repairZeroTempoPads")();
+          if (!result || !result.ok) {
+            statusEl.textContent = "Failed to repair pad tempo (is a card connected?).";
+            return;
+          }
+          const mode = await window.getNativeFunction("getSyncMode")();
+          const offlineHint =
+            mode && mode.offline ? ' Use "Sync Mirror → Card" to push the fix to your SP-404SX.' : "";
+          statusEl.textContent =
+            result.repairedCount > 0
+              ? `Repaired ${result.repairedCount} pad(s) with a zero tempo (TIME/BPM crash fix).${offlineHint}`
+              : "No pads needed repairing.";
+        },
         "toggle-sync-mode": async () => {
           const mode = await window.getNativeFunction("getSyncMode")();
           if (mode && mode.offline) {
