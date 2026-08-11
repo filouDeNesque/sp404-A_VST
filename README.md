@@ -360,7 +360,17 @@ docs/     spécification du format de carte SD SP-404SX et ses sources.
   temps réel piloté par la note MIDI reçue ; chaque pad continue de jouer à vitesse fixe quelle
   que soit la note (comportement "pad", pas synthé multi-échantillonné).
 - Une seule voix par pad : rejouer une note pendant qu'elle sonne déjà coupe et relance (léger
-  fade de ~1ms pour éviter un clic), pas de chevauchement polyphonique du même pad.
+  fade de ~1ms pour éviter un clic), pas de chevauchement polyphonique du même pad — **sauf pour
+  un pad en mode `loop`** (2026-08-11, sur demande : "en mode loop lors de reappuie sur un pad ça
+  dois arreter le son du pad") : un pad en boucle n'a pas de fin naturelle (sa position revient au
+  début indéfiniment plutôt que de couper la voix) et, s'il n'est pas gated en plus, ne reçoit
+  jamais de note-off qui l'arrêterait non plus (voir plus bas) -- réappuyer dessus est alors le
+  seul moyen de l'arrêter, donc ce cas précis coupe le son au lieu de relancer depuis le début
+  (`PluginProcessor::handleMidiMessage`, avant le calcul de la plage à jouer). Concerne aussi bien
+  un clic maintenu sur un pad dans l'UI (`previewPadOn`/`previewPadOff`) qu'un vrai contrôleur
+  MIDI, puisque les deux passent par le même chemin. Non testé en interaction réelle dans un
+  DAW/hôte (comme tout ce qui touche au triggering MIDI live dans cette section) -- vérifié par
+  compilation, `ctest`, et `auval` uniquement.
 - Polyphonie limitée à 2 pads distincts simultanés (`kMaxPolyphony`) ; un 3ᵉ pad coupe le plus
   ancien.
 - Pas de détection de tonalité/clé musicale (voir panneau DSP) — seul le BPM est estimé.

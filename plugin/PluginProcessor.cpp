@@ -238,6 +238,18 @@ void PluginProcessor::handleMidiMessage(const juce::MidiMessage& message) {
         if (!pad.hasSample)
             return;
 
+        Voice& voice = voices[static_cast<size_t>(padIndex)];
+
+        // A looping pad has no natural end (renderVoices wraps its position back to rangeStart
+        // forever instead of ever setting voice.active = false) and, if it's also ungated, never
+        // gets a note-off that would stop it either (see the note-off branch below) -- pressing it
+        // again is the only way to stop it, so a re-press of an already-sounding loop pad toggles
+        // it off instead of retriggering it from the start.
+        if (pad.info.loop && voice.active && voice.padIndex == padIndex) {
+            stopVoice(voice);
+            return;
+        }
+
         int rangeStart = static_cast<int>(pad.info.userSampleStart);
         int rangeEnd = static_cast<int>(pad.info.userSampleEnd);
         const int numSamples = pad.buffer.getNumSamples();
@@ -245,8 +257,6 @@ void PluginProcessor::handleMidiMessage(const juce::MidiMessage& message) {
             rangeStart = 0;
             rangeEnd = numSamples;
         }
-
-        Voice& voice = voices[static_cast<size_t>(padIndex)];
 
         // Voice stealing: retriggering a pad that's already sounding doesn't add to the
         // concurrent-pad count (it just restarts below). Triggering a *different* pad while
