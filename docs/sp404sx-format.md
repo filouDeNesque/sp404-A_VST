@@ -130,6 +130,26 @@ reverse=false, format=Wave, channels=2, tempoMode=Off, origTempo=1064 (106.4 BPM
 userTempo=1064`. Toutes les valeurs sont cohérentes avec un vrai pad WAV stéréo en boucle —
 la table d'offsets `PAD_INFO.BIN` est donc considérée fiable.
 
+### Bug matériel : `origTempo=0` fait planter le bouton TIME/BPM (découvert et corrigé 2026-08-11)
+
+Signalé par l'utilisateur : sur un pad dont le sample a été chargé/remplacé depuis le plugin,
+appuyer sur le bouton TIME/BPM du SP-404SX n'a aucun effet sur le sample puis fait planter
+l'appareil. `sp404::replacePadSample` (voir plus haut dans ce doc pour le format) écrivait jusque
+là `tempoMode=Off, origTempo=0, userTempo=0` pour tout sample fraîchement importé/réécrit — or
+l'exemple ci-dessus montre qu'un vrai pad garde toujours un `origTempo`/`userTempo` non-nul même
+quand `tempoMode=Off`. Hypothèse retenue : le firmware calcule un ratio
+`bpmCible / origTempo` pour le time-stretch du bouton TIME/BPM, indépendamment de `tempoMode` —
+avec `origTempo=0` ça fait une division par zéro, ce qui correspond exactement au symptôme
+observé (aucun effet, puis crash).
+
+Correctif (`core/src/SdCard.cpp`, `kDefaultTempoTenths`) : `origTempo`/`userTempo` sont
+maintenant initialisés à 1200 (120 BPM, valeur arbitraire mais non-nulle et neutre — sa valeur
+exacte n'a pas d'importance tant que `tempoMode` reste `Off`) au lieu de 0 à chaque écriture de
+`replacePadSample`, que ce soit un import glisser-déposer ou une réécriture par le panneau DSP.
+**Non testé sur vrai hardware pour l'instant** — hypothèse forte (cohérente avec le nom du champ,
+son comportement sur un pad réel, et le symptôme exact rapporté) mais pas encore confirmée par un
+test réel du bouton TIME/BPM sur un pad importé après ce correctif.
+
 ## Taux d'échantillonnage natif (vérifié 2026-08-09)
 
 Lecture brute de l'en-tête `fmt ` de `SMPL/A0000001.WAV` sur la vraie carte : **44100 Hz,

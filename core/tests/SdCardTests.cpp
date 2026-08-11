@@ -254,8 +254,8 @@ TEST_CASE("replacePadSample(resetPlaybackDefaults=true) writes the WAV file, upd
     before.origSampleStart = 999; // stale values from a previous, different sample
     before.origSampleEnd = 12345;
     before.tempoMode = sp404::PadInfo::TempoMode::User;
-    before.origTempo = 1200;
-    before.userTempo = 1200;
+    before.origTempo = 900; // stale value from a previous, different sample -- must be overwritten
+    before.userTempo = 900;
     sp404::savePadInfo(root, 'C', 5, before);
 
     const auto wavBytes = buildMinimalWavBytes(2, 44100, 16, 400);
@@ -284,9 +284,13 @@ TEST_CASE("replacePadSample(resetPlaybackDefaults=true) writes the WAV file, upd
     CHECK(pad.origSampleEnd == 444);  // 44 + 400 bytes of data
     CHECK(pad.userSampleStart == 44);
     CHECK(pad.userSampleEnd == 444);
+    // TempoMode goes to Off, but origTempo/userTempo must NOT be 0 -- a real SP-404SX pad always
+    // carries a non-zero tempo even when TempoMode is Off, and origTempo=0 is believed to crash
+    // the hardware's TIME/BPM tempo-match feature (see SdCard.h's replacePadSample doc comment).
     CHECK(pad.tempoMode == sp404::PadInfo::TempoMode::Off);
-    CHECK(pad.origTempo == 0);
-    CHECK(pad.userTempo == 0);
+    CHECK(pad.origTempo != 0);
+    CHECK(pad.userTempo != 0);
+    CHECK(pad.origTempo == pad.userTempo);
 
     // Other pads must be untouched.
     const auto& c4 = card.banks()[2].pads[3].info;

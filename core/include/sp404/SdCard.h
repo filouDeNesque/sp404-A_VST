@@ -103,8 +103,12 @@ bool copyPatternSlot(const std::filesystem::path& sdRoot, char srcBank, int srcI
 // Replaces a pad's sample with a raw WAV file (wavBytes is written verbatim, no re-encoding), and
 // updates that pad's PAD_INFO.BIN record to match the new file: origSampleStart/End (byte offsets
 // of the new file's "data" chunk, see docs/sp404sx-format.md) and channels/format are recomputed;
-// userSampleStart/End reset to cover the whole new file (no trim yet); tempoMode/origTempo/
-// userTempo reset to Off/0 (no tempo info for a freshly-imported sample). loop/reverse/lofi are
+// userSampleStart/End reset to cover the whole new file (no trim yet); tempoMode reset to Off,
+// origTempo/userTempo reset to a fixed non-zero fallback (kDefaultTempoTenths in SdCard.cpp, 120
+// BPM) rather than 0 -- a real SP-404SX pad never has origTempo=0, even with TempoMode=Off (see
+// docs/sp404sx-format.md); leaving it at 0 is believed to make the hardware's TIME/BPM tempo-match
+// feature divide by zero, crashing the unit and having no audible effect (reported on real
+// hardware for VST-imported pads, 2026-08-11). loop/reverse/lofi are
 // always preserved from the pad's existing record. volume/gate are preserved too, *unless*
 // resetPlaybackDefaults is true, in which case they're set to a fixed audible default (100/127,
 // gate on) instead -- pass true for a genuinely new sample landing on a pad (drag & drop import,

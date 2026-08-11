@@ -22,6 +22,13 @@ void checkPadRange(char bankName, int indexInBank, const char* fnName) {
         throw std::invalid_argument(std::string(fnName) + ": bank/pad out of range");
 }
 
+// BPM * 10 fallback used for freshly-imported samples -- see replacePadSample. A real SP-404SX
+// pad always carries a non-zero OrigTempo/UserTempo, even when TempoMode is Off (verified against
+// a real card, see docs/sp404sx-format.md); origTempo=0 is believed to make the hardware's
+// TIME/BPM tempo-match feature divide by zero. 120 BPM is an arbitrary but harmless neutral
+// default -- its exact value doesn't matter while TempoMode stays Off, it only has to be non-zero.
+constexpr uint32_t kDefaultTempoTenths = 1200;
+
 // Per-bank pad number, e.g. bank 'B' pad 3 -> "B0000003" (see docs/sp404sx-format.md).
 std::string sampleStem(char bank, int indexInBank) {
     std::ostringstream oss;
@@ -248,8 +255,8 @@ void replacePadSample(const std::filesystem::path& sdRoot, char bankName, int in
     updated.userSampleStart = updated.origSampleStart;
     updated.userSampleEnd = updated.origSampleEnd;
     updated.tempoMode = PadInfo::TempoMode::Off;
-    updated.origTempo = 0;
-    updated.userTempo = 0;
+    updated.origTempo = kDefaultTempoTenths;
+    updated.userTempo = kDefaultTempoTenths;
 
     savePadInfo(sdRoot, bankName, indexInBank, updated);
 }

@@ -373,6 +373,21 @@ docs/     spécification du format de carte SD SP-404SX et ses sources.
 ## Roadmap (hors scope de cette mise en place)
 
 
+- ✅ **Correctif : le bouton TIME/BPM plantait la SP-404SX sur les pads importés depuis le VST**
+  (2026-08-11, signalé par l'utilisateur : "n'a aucun effet sur le sample" puis crash de
+  l'appareil). Cause identifiée : `sp404::replacePadSample` (`core/src/SdCard.cpp`) écrivait
+  `origTempo=0, userTempo=0` pour tout sample fraîchement importé/réécrit, alors qu'un vrai pad
+  garde toujours un `origTempo`/`userTempo` non-nul même quand `tempoMode=Off` (vérifié sur une
+  vraie carte, voir `docs/sp404sx-format.md`). Hypothèse retenue : le firmware calcule un ratio
+  `bpmCible / origTempo` pour le time-stretch, indépendamment de `tempoMode` — `origTempo=0`
+  donnerait une division par zéro, cohérent avec le symptôme exact (aucun effet, puis crash).
+  Corrigé en initialisant `origTempo`/`userTempo` à 1200 (120 BPM, `kDefaultTempoTenths` —
+  valeur arbitraire mais non-nulle, sa précision n'a pas d'importance tant que `tempoMode` reste
+  `Off`) au lieu de 0, sur les deux chemins qui écrivent un pad (import glisser-déposer et
+  réécriture par le panneau DSP, tous deux passant par `replacePadSample`). Test dédié dans
+  `core/tests/SdCardTests.cpp` (vérifie `origTempo`/`userTempo != 0` après import). Détail complet
+  dans `docs/sp404sx-format.md`. **Non testé sur vrai hardware** : hypothèse forte mais pas encore
+  confirmée par un essai réel du bouton TIME/BPM sur un pad importé après ce correctif.
 - Détection de carte SD sur Windows/Linux si le projet s'étend au-delà de macOS (pour l'instant
   `findConnectedCardRoot()` ne scanne que `/Volumes`).
 - ✅ **Barre de progression étape par étape pour Save/Load/Sync** (2026-08-10, sur demande) :
